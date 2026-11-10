@@ -17,6 +17,11 @@
     pointers: new Map(),
     pinch: null,
     moved: false,
+    crop: null,          // {x0,y0,x1,y1} 图像坐标
+    anchor: null,        // 手绘连续点锚点
+    bleDevice: null,
+    bleChar: null,
+    interior: null,      // 内部识别轮廓（图像坐标点数组）
   };
 
   const cv = document.getElementById('cv');
@@ -132,6 +137,36 @@
       ctx.beginPath(); ctx.arc(q.x, q.y, 4, 0, Math.PI * 2); ctx.fill();
     });
 
+    if (S.interior && S.interior.length > 2) {
+      ctx.save();
+      ctx.setLineDash([10, 6]);
+      ctx.strokeStyle = '#2e7d32';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      S.interior.forEach((p, i) => {
+        const q = i2s(p);
+        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+      });
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+    if (S.crop) {
+      const a = i2s({ x: S.crop.x0, y: S.crop.y0 });
+      const b = i2s({ x: S.crop.x1, y: S.crop.y1 });
+      ctx.save();
+      ctx.setLineDash([8, 5]);
+      ctx.strokeStyle = '#f5a623';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y),
+                     Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+      ctx.restore();
+    }
+    if (S.anchor) {
+      const q = i2s(S.anchor);
+      ctx.fillStyle = '#f5a623';
+      ctx.beginPath(); ctx.arc(q.x, q.y, 6, 0, Math.PI * 2); ctx.fill();
+    }
     if (S.pending) {
       const q = i2s(S.pending);
       ctx.fillStyle = '#f5a623';
@@ -186,7 +221,8 @@
       div.className = 'row' + (S.selected && S.selected.kind === 'seg' && S.selected.idx === i ? ' sel' : '');
       const val = sg.len == null ? '?' : sg.len.toFixed(3) + ' m';
       const corr = sg.len != null && sg.adj ? ` → ${corrected(sg).toFixed(3)} m` : '';
-      div.innerHTML = `<span>段${i + 1}<span class="tag"> ${sg.adj || ''}</span></span>
+      const ph = sg.photo ? ' 📷' : '';
+      div.innerHTML = `<span>段${i + 1}<span class="tag"> ${sg.adj || ''}${ph}</span></span>
                        <span class="val">${val}${corr}</span>`;
       div.onclick = () => { S.selected = { kind: 'seg', idx: i }; render(); refreshList(); };
       list.appendChild(div);
@@ -196,7 +232,8 @@
       div.className = 'row' + (S.selected && S.selected.kind === 'note' && S.selected.idx === i ? ' sel' : '');
       let txt = nt.len == null ? '?' : nt.len.toFixed(3) + ' m';
       if (nt.adj) txt = `${nt.adj[0]} ${txt} ${nt.adj[1] || ''}`;
-      div.innerHTML = `<span>点${i + 1}</span><span class="val">${txt}</span>`;
+      const ph = nt.photo ? ' 📷' : '';
+      div.innerHTML = `<span>点${i + 1}<span class="tag"> ${ph}</span></span><span class="val">${txt}</span>`;
       div.onclick = () => { S.selected = { kind: 'note', idx: i }; render(); refreshList(); };
       list.appendChild(div);
     });
@@ -254,7 +291,7 @@
   }
 
   // ---------- 自动描线（附图：单线灰度） ----------
-  function autoTrace() {
+  function autoTrace(useCrop) {
     if (!S.img) { setStatus('先打开图纸'); return; }
     const maxW = 1500;
     const k = Math.min(1, maxW / S.img.width);
@@ -339,7 +376,16 @@
         segs.push({ a: { x, y: L.y0 * scale }, b: { x, y: L.y1 * scale }, len: null, adj: '' });
       }
     });
-    if (!segs.length) { setStatus('自动描线：没找到线条'); return; }
+    if (useCrop && S.crop) {
+      const c = S.crop;
+      const keep = segs.filter(s => {
+        const mx = (s.a.x + s.b.x) / 2, my = (s.a.y + s.b.y) / 2;
+        return mx >= Math.min(c.x0, c.x1) && mx <= Math.max(c.x0, c.x1)
+            && my >= Math.min(c.y0, c.y1) && my <= Math.max(c.y0, c.y1);
+      });
+      segs.length = 0; Array.prototype.push.apply(segs, keep);
+    }
+    if (!segs.length) { setStatus('自动描线：没找到线条（检查框选范围）'); return; }
     pushUndo();
     S.segments = segs.slice(0, 600);
     S.notes = []; S.selected = null;
@@ -347,6 +393,130 @@
     document.querySelectorAll('#toolbar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === 'select'));
     render(); refreshList();
     setStatus(`自动描线完成：${S.segments.length} 条（横 ${hLines.length} / 竖 ${vLines.length}）`);
+  }
+
+  // ---------- 内部识别（白区泛洪 + 轮廓） ----------
+  function interiorRecognize() {
+    if (!S.img) { setStatus('先打开图纸'); return; }
+    const c = S.crop;
+    const maxW = 1200;
+    const k = Math.min(1, maxW / S.img.width);
+    const w = Math.max(1, Math.round(S.img.width * k));
+    const h = Math.max(1, Math.round(S.img.height * k));
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const octx = off.getContext('2d');
+    octx.drawImage(S.img, 0, 0, w, h);
+    const data = octx.getImageData(0, 0, w, h).data;
+    const dark = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+      const v = Math.max(data[i], data[i + 1], data[i + 2]);
+      dark[p] = v < 175 ? 1 : 0;
+    }
+    let seed;
+    if (c) {
+      seed = { x: Math.round((c.x0 + c.x1) / 2 * k), y: Math.round((c.y0 + c.y1) / 2 * k) };
+    } else {
+      seed = { x: Math.round(w / 2), y: Math.round(h / 2) };
+    }
+    if (seed.x < 0 || seed.x >= w || seed.y < 0 || seed.y >= h) { setStatus('框选范围无效'); return; }
+    // 若种子落在线上，向周围找一个白点
+    if (dark[seed.y * w + seed.x]) {
+      outer: for (let r = 1; r < 30; r++) {
+        for (let dx = -r; dx <= r; dx++) {
+          for (let dy = -r; dy <= r; dy++) {
+            const x = seed.x + dx, y = seed.y + dy;
+            if (x >= 0 && x < w && y >= 0 && y < h && !dark[y * w + x]) { seed = { x, y }; break outer; }
+          }
+        }
+      }
+    }
+    const region = new Uint8Array(w * h);
+    const stack = [seed];
+    region[seed.y * w + seed.x] = 1;
+    const maxPix = Math.round(w * h * 0.6);
+    let cnt = 0;
+    while (stack.length && cnt < maxPix) {
+      const q = stack.pop();
+      cnt++;
+      const x = q.x, y = q.y;
+      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of nb) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
+        const idx = ny * w + nx;
+        if (region[idx] || dark[idx]) continue;
+        region[idx] = 1;
+        stack.push({ x: nx, y: ny });
+      }
+    }
+    // 边界点
+    const bpts = [];
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        if (!region[y * w + x]) continue;
+        if (!region[(y - 1) * w + x] || !region[(y + 1) * w + x] ||
+            !region[y * w + x - 1] || !region[y * w + x + 1]) {
+          bpts.push({ x, y });
+        }
+      }
+    }
+    if (bpts.length < 30) { setStatus('内部识别：没有找到封闭内部区域'); return; }
+    // 采样 + 简化：按角度贪心走一圈
+    const step = Math.max(1, Math.floor(bpts.length / 400));
+    const pts = bpts.filter((_, i) => i % step === 0);
+    const ordered = [pts[0]];
+    const used = new Set([0]);
+    let cur = pts[0];
+    for (let n = 1; n < Math.min(pts.length, 200); n++) {
+      let bi = -1, bd = 1e9;
+      pts.forEach((p, i) => {
+        if (used.has(i)) return;
+        const d = (p.x - cur.x) ** 2 + (p.y - cur.y) ** 2;
+        if (d < bd) { bd = d; bi = i; }
+      });
+      if (bi < 0 || bd > 60 * 60) break;
+      used.add(bi); ordered.push(pts[bi]); cur = pts[bi];
+    }
+    if (ordered.length < 3) { setStatus('内部识别：轮廓提取失败'); return; }
+    S.interior = ordered.map(p => ({ x: p.x / k, y: p.y / k }));
+    setStatus(`内部识别完成：轮廓 ${S.interior.length} 个点，可用「画轮廓」变成线段`);
+    render();
+  }
+
+  function interiorToSegments() {
+    if (!S.interior || S.interior.length < 3) { setStatus('先做内部识别'); return; }
+    pushUndo();
+    for (let i = 0; i < S.interior.length; i++) {
+      const a = S.interior[i], b = S.interior[(i + 1) % S.interior.length];
+      if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+        S.segments.push({ a: { x: a.x, y: a.y }, b: { x: b.x, y: a.y }, len: null, adj: '' });
+      } else {
+        S.segments.push({ a: { x: a.x, y: a.y }, b: { x: a.x, y: b.y }, len: null, adj: '' });
+      }
+    }
+    render(); refreshList();
+    setStatus('已把内部轮廓转成线段');
+  }
+
+  function closeLoop() {
+    if (S.segments.length < 2) { setStatus('线段太少'); return; }
+    const key = p => `${Math.round(p.x / 3)},${Math.round(p.y / 3)}`;
+    const deg = new Map();
+    S.segments.forEach(sg => {
+      [sg.a, sg.b].forEach(p => {
+        const k = key(p);
+        deg.set(k, (deg.get(k) || 0) + 1);
+      });
+    });
+    const ends = [];
+    S.segments.forEach(sg => {
+      [sg.a, sg.b].forEach(p => { if (deg.get(key(p)) === 1) ends.push(p); });
+    });
+    if (ends.length < 2) { setStatus('没有可闭合的开口端点'); return; }
+    pushUndo();
+    S.segments.push({ a: ends[0], b: ends[ends.length - 1], len: null, adj: '' });
+    render(); refreshList(); setStatus('已闭合端到端');
   }
 
   // ---------- 交互 ----------
@@ -402,21 +572,49 @@
 
   function handleTap(pt) {
     const ip = s2i(pt);
-    if (S.mode === 'draw' || S.mode === 'note') {
+
+    if (S.mode === 'crop') {
+      if (!S.cropFirst) {
+        S.cropFirst = ip;
+        setStatus('框选范围：点对角第二个点');
+        return;
+      }
+      const a = S.cropFirst; S.cropFirst = null;
+      S.crop = {
+        x0: Math.min(a.x, ip.x), y0: Math.min(a.y, ip.y),
+        x1: Math.max(a.x, ip.x), y1: Math.max(a.y, ip.y),
+      };
+      setStatus('已框选范围（自动描线只识别框内）');
+      render();
+      return;
+    }
+
+    if (S.mode === 'draw') {
+      if (!S.anchor) {
+        S.anchor = ip;
+        setStatus('手绘：继续点，相邻点自动连线；点「点选」或「清空」结束');
+        render();
+        return;
+      }
+      pushUndo();
+      S.segments.push({ a: S.anchor, b: ip, len: null, adj: '' });
+      S.selected = { kind: 'seg', idx: S.segments.length - 1 };
+      S.anchor = ip;
+      setStatus('已加线段，可继续点下一点');
+      render(); refreshList();
+      return;
+    }
+
+    if (S.mode === 'note') {
       if (!S.pending) {
         S.pending = ip;
-        setStatus(S.mode === 'draw' ? '手绘：点终点' : '点注：点第二个点');
+        setStatus('点注：点第二个点');
         render();
         return;
       }
       const first = S.pending;
       S.pending = null;
-      if (S.mode === 'draw') {
-        pushUndo();
-        S.segments.push({ a: first, b: ip, len: null, adj: '' });
-        S.selected = { kind: 'seg', idx: S.segments.length - 1 };
-        setStatus('已加线段，可输入长度或按徕卡测量');
-      } else {
+      {
         const mid = { x: (first.x + ip.x) / 2, y: (first.y + ip.y) / 2 };
         const s = prompt('输入长度（米，可留空稍后填）');
         let v = null;
@@ -432,7 +630,7 @@
       render(); refreshList();
       return;
     }
-    if (S.mode === 'split') {
+    if (S.mode === 'split' || S.mode === 'addline') {
       const hit = hitSegment(pt);
       if (!hit) { setStatus('分割：没点中线段'); return; }
       splitSegment(hit.idx, hit.t);
@@ -493,6 +691,7 @@
     const s2 = { a: { ...p }, b: { ...sg.b }, len: null, adj: sg.adj };
     S.segments.splice(i, 1, s1, s2);
     S.selected = { kind: 'seg', idx: i };
+    S.anchor = null;
     render(); refreshList(); setStatus('已分割');
   }
 
@@ -508,9 +707,11 @@
         filters: [{ services: [BLE_SERVICE] }],
         optionalServices: [BLE_SERVICE],
       });
+      S.bleDevice = device;
       const server = await device.gatt.connect();
       const svc = await server.getPrimaryService(BLE_SERVICE);
       const ch = await svc.getCharacteristic(BLE_MEASURE);
+      S.bleChar = ch;
       await ch.startNotifications();
       ch.addEventListener('characteristicvaluechanged', (ev) => {
         const dv = ev.target.value;
@@ -547,15 +748,16 @@
 
   function exportCsv() {
     if (!S.segments.length && !S.notes.length) { alert('还没有数据'); return; }
-    const rows = [['序号', '类型', '长度(m)', '修正', '修正后长度(m)', '墙厚(mm)', '起点x', '起点y', '终点x', '终点y']];
+    const rows = [['序号', '类型', '长度(m)', '修正', '修正后长度(m)', '墙厚(mm)', '起点x', '起点y', '终点x', '终点y', '照片']];
     S.segments.forEach((sg, i) => {
       const corr = sg.len == null ? '' : corrected(sg).toFixed(4);
       rows.push([i + 1, '段', sg.len == null ? '' : sg.len.toFixed(4), sg.adj || '',
-        corr, $('thick').value, sg.a.x.toFixed(1), sg.a.y.toFixed(1), sg.b.x.toFixed(1), sg.b.y.toFixed(1)]);
+        corr, $('thick').value, sg.a.x.toFixed(1), sg.a.y.toFixed(1), sg.b.x.toFixed(1), sg.b.y.toFixed(1),
+        sg.photo ? '有' : '']);
     });
     S.notes.forEach((nt, i) => {
       rows.push(['点' + (i + 1), '点注', nt.len == null ? '' : nt.len.toFixed(4), nt.adj || '',
-        '', $('thick').value, nt.pos.x.toFixed(1), nt.pos.y.toFixed(1), '', '']);
+        '', $('thick').value, nt.pos.x.toFixed(1), nt.pos.y.toFixed(1), '', '', nt.photo ? '有' : '']);
     });
     const csv = '\ufeff' + rows.map(r => r.join(',')).join('\n');
     download('测量数据.csv', new Blob([csv], { type: 'text/csv' }));
@@ -662,17 +864,95 @@
   $('fileInput').onchange = (e) => { const f = e.target.files[0]; if (f) openFile(f); e.target.value = ''; };
   $('btnFit').onclick = () => fitView();
   $('btnRot').onclick = () => { S.view.rot = (S.view.rot + 90) % 360; render(); };
-  $('btnRot180').onclick = () => { S.view.rot = (S.view.rot + 180) % 360; render(); };
-  $('btnTrace').onclick = autoTrace;
+  $('btnTrace').onclick = () => autoTrace(false);
+  $('btnCropTrace').onclick = () => {
+    if (!S.crop) { setStatus('先点「框选范围」框住要识别的区域'); return; }
+    autoTrace(true);
+  };
+  $('btnInterior').onclick = interiorRecognize;
+  $('btnInteriorUndo').onclick = () => { S.interior = null; render(); setStatus('已撤回内部识别'); };
+  $('btnOutline').onclick = interiorToSegments;
+  $('btnClose').onclick = closeLoop;
   $('btnUndo').onclick = undo;
   $('btnBle').onclick = connectBle;
+  $('btnBleOff').onclick = () => {
+    try { if (S.bleDevice) S.bleDevice.gatt.disconnect(); } catch (e) {}
+    S.bleChar = null; S.bleDevice = null;
+    setBle('蓝牙未连接'); setStatus('蓝牙已断开');
+  };
+  $('btnZoomIn').onclick = () => {
+    if (!S.img) return;
+    const r = cv.getBoundingClientRect();
+    zoomAt({ x: r.width / 2, y: r.height / 2 }, 1.25);
+  };
+  $('btnZoomOut').onclick = () => {
+    if (!S.img) return;
+    const r = cv.getBoundingClientRect();
+    zoomAt({ x: r.width / 2, y: r.height / 2 }, 0.8);
+  };
+  $('btnCropClear').onclick = () => { S.crop = null; setStatus('已清除框选'); render(); };
+  $('btnInputLen').onclick = () => {
+    const it = itemOf(S.selected);
+    if (!it) { setStatus('先选中一条'); return; }
+    const s = prompt('输入长度（米）', it.len == null ? '' : String(it.len));
+    if (s == null) return;
+    const v = parseFloat(String(s).replace(/m/ig, ''));
+    if (isNaN(v)) { setStatus('长度无效'); return; }
+    pushUndo();
+    it.len = v;
+    render(); refreshList(); setStatus('已输入长度');
+  };
+  $('btnClearAll').onclick = () => {
+    if (!S.segments.length && !S.notes.length) return;
+    if (!confirm('清空所有线段和注记？')) return;
+    pushUndo();
+    S.segments = []; S.notes = []; S.selected = null; S.anchor = null; S.crop = null;
+    render(); refreshList(); setStatus('已清空');
+  };
+  $('btnPhoto').onclick = () => {
+    if (!S.selected) { setStatus('先选中一条再拍照'); return; }
+    $('photoInput').click();
+  };
+  $('btnPickPhoto').onclick = () => {
+    if (!S.selected) { setStatus('先选中一条再选图片'); return; }
+    $('photoInput').click();
+  };
+  $('photoInput').onchange = (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const it = itemOf(S.selected);
+    if (!it) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      it.photo = rd.result;
+      it.photoName = f.name;
+      refreshList(); setStatus('已关联照片：' + f.name);
+    };
+    rd.readAsDataURL(f);
+  };
+  $('btnViewPhoto').onclick = () => {
+    const it = itemOf(S.selected);
+    if (!it || !it.photo) { setStatus('该条没有照片'); return; }
+    const w = window.open('');
+    w.document.write('<title>照片</title><img style="max-width:100%" src="' + it.photo + '">');
+  };
 
   document.querySelectorAll('#toolbar [data-mode]').forEach(btn => {
     btn.onclick = () => {
       S.mode = btn.dataset.mode;
       S.pending = null;
       document.querySelectorAll('#toolbar [data-mode]').forEach(b => b.classList.toggle('active', b === btn));
-      setStatus({ draw: '手绘：点起点、终点', select: '点选：点线或数字选中', note: '点注：点两个点，数字放中间', split: '分割：点要分割的线' }[S.mode]);
+      S.pending = null;
+      if (S.mode !== 'draw') S.anchor = null;
+      setStatus({
+        draw: '手绘：连续点，相邻点自动连线',
+        select: '点选：点线或数字选中',
+        addline: '加线：点线段上一点，把线分成两段',
+        split: '分割：点要分割的线',
+        note: '点注：点两个点，数字放中间',
+        crop: '框选范围：点第一个角，再点对角',
+      }[S.mode]);
       render();
     };
   });
