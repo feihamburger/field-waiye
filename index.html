@@ -19,6 +19,7 @@
   <span id="bleState" class="ble">蓝牙未连接</span>
   <button id="btnBle">连接徕卡</button>
   <button id="btnBleOff">断开</button>
+  <button id="btnBleLog">蓝牙包</button>
 </header>
 <input type="file" id="fileInput" accept="*/*" hidden>
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
@@ -51,6 +52,9 @@
     <option value="+-">+-</option>
     <option value="--">--</option>
   </select>
+  <button id="btnAutoAcc">自动累加:关</button>
+  <button id="btnAccMinus">下一笔减</button>
+  <button id="btnAccZero">累加归零</button>
   <button id="btnApplyAdj">应用修正</button>
   <button id="btnCsv">导出CSV</button>
   <button id="btnPdf">导出PDF手稿</button>
@@ -61,6 +65,7 @@
   <div id="hint" class="hint">点「打开图纸」→ 选择 PDF 或图片；单指拖动平移，双指缩放。</div>
 </main>
 
+<pre id="bleLog" style="display:none;margin:0;padding:6px 10px;max-height:160px;overflow:auto;background:#0b1b2b;color:#9fe;font-size:12px;white-space:pre-wrap;"></pre>
 <section id="panel">
   <div class="panel-head">
     <span id="panelTitle">线段 / 注记</span>
@@ -71,6 +76,6 @@
 
 <script src="lib/pdf.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
-<script src="app.js?v=24"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>

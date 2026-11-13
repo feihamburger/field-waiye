@@ -19,10 +19,17 @@
     moved: false,
     crop: null,          // {x0,y0,x1,y1} 图像坐标
     anchor: null,        // 手绘连续点锚点
+    blePackets: [],
     bleDevice: null,
     bleChar: null,
     interior: null,
-    interiorStart: null,      // 内部识别轮廓（图像坐标点数组）
+    interiorStart: null,
+    accum: 0,
+    lastMeas: null,
+    accSel: null,
+    accValue: 0,
+    accSign: 1,
+    autoAcc: false,      // 内部识别轮廓（图像坐标点数组）
     addFrom: null,
     cropDragStart: null,
     cropDragCur: null,
@@ -1225,6 +1232,15 @@
           const hex = Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
           const dist = dv.byteLength >= 4 ? dv.getFloat32(0, true) : NaN;
           const cuuid = (ev.target.uuid || '').slice(4, 8);
+          S.blePackets.push({ t: Date.now(), uuid: cuuid, hex, dist });
+          if (S.blePackets.length > 40) S.blePackets.shift();
+          const logEl = document.getElementById('bleLog');
+          if (logEl && logEl.style.display !== 'none') {
+            logEl.textContent = S.blePackets.map((p, i) =>
+              `${i + 1}. [${p.uuid}] f32=${isFinite(p.dist) ? p.dist.toFixed(4) : 'NaN'}  ${p.hex}`
+            ).join('\n');
+            logEl.scrollTop = logEl.scrollHeight;
+          }
           window.__lastBlePacket = { hex, dist, bytes: dv.byteLength, uuid: cuuid };
           if (isFinite(dist) && dist > 0.001 && dist < 10000) {
             onMeasure(dist);
@@ -1264,11 +1280,27 @@
 
   function onMeasure(v) {
     if (!isFinite(v)) return;
+    S.lastMeas = v;
     const it = itemOf(S.selected);
     if (!it) { setStatus(`收到 ${v.toFixed(4)} m（未选中）`); return; }
-    it.len = v;
+    // 自动累加：选中项不变时，后续读数依次累加
+    const sel = S.selected;
+    if (!S.accSel || S.accSel.kind !== sel.kind || S.accSel.idx !== sel.idx) {
+      S.accSel = { kind: sel.kind, idx: sel.idx };
+      S.accValue = 0;
+    }
+    const sign = S.accSign || 1;
+    S.accSign = 1;
+    if (S.autoAcc) {
+      S.accValue += sign * v;
+      it.len = S.accValue;
+      setStatus(`自动累加 ${S.accValue.toFixed(4)} m（本次 ${sign > 0 ? '+' : '-'}${v.toFixed(4)}）`);
+    } else {
+      it.len = v;
+      S.accValue = v;
+      setStatus(`收到 ${v.toFixed(4)} m（设备累加模式：取最新读数）`);
+    }
     render(); refreshList();
-    setStatus(`收到 ${v.toFixed(4)} m`);
   }
 
   // ---------- 导出 ----------
@@ -1419,6 +1451,16 @@
   $('btnClose').onclick = closeLoop;
   $('btnUndo').onclick = undo;
   $('btnBle').onclick = connectBle;
+  $('btnBleLog').onclick = () => {
+    const el = document.getElementById('bleLog');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    if (el.style.display !== 'none') {
+      el.textContent = S.blePackets.map((p, i) =>
+        `${i + 1}. [${p.uuid}] f32=${isFinite(p.dist) ? p.dist.toFixed(4) : 'NaN'}  ${p.hex}`
+      ).join('\n');
+      el.scrollTop = el.scrollHeight;
+    }
+  };
   $('btnBleOff').onclick = () => {
     if (window.__blePoll) { clearInterval(window.__blePoll); window.__blePoll = null; }
     try { if (S.bleDevice) S.bleDevice.gatt.disconnect(); } catch (e) {}
@@ -1493,8 +1535,8 @@
       setStatus({
         draw: '手绘：连续点，相邻点自动连线',
         select: '点选：点线或数字选中',
-        addline: '加线：点线段上一点，把线分成两段',
-        split: '分割：点要分割的线',
+        addline: '加线：点起点（自动吸附）、点终点，自动横平竖直并断开 T 形接头',
+        split: '分割：先点选一条线，再点分割位置',
         note: '点注：点两个点，数字放中间',
         crop: '框选范围：点第一个角，再点对角',
       }[S.mode]);
@@ -1511,6 +1553,26 @@
     render(); refreshList(); setStatus('已删除');
   };
 
+  $('btnAutoAcc').onclick = () => {
+    S.autoAcc = !S.autoAcc;
+    $('btnAutoAcc').textContent = '自动累加:' + (S.autoAcc ? '开' : '关');
+    setStatus(S.autoAcc
+      ? '自动累加已开：每按一次测量，读数累加到当前选中项'
+      : '自动累加已关：取设备最新读数（徕卡 + 模式已自带累加）');
+  };
+  $('btnAccMinus').onclick = () => {
+    S.accSign = -1;
+    setStatus('下一笔测量将做减法（只减一次）');
+  };
+  $('btnAccZero').onclick = () => {
+    S.accValue = 0;
+    S.accSel = null;
+    S.accSign = 1;
+    const it = itemOf(S.selected);
+    if (it) it.len = null;
+    render(); refreshList();
+    setStatus('累加已归零');
+  };
   $('btnApplyAdj').onclick = () => {
     const it = itemOf(S.selected);
     if (!it) { setStatus('先选中一条'); return; }
