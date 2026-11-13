@@ -21,7 +21,12 @@
     anchor: null,        // 手绘连续点锚点
     bleDevice: null,
     bleChar: null,
-    interior: null,      // 内部识别轮廓（图像坐标点数组）
+    interior: null,
+    interiorStart: null,      // 内部识别轮廓（图像坐标点数组）
+    addFrom: null,
+    cropDragStart: null,
+    cropDragCur: null,
+    downPt: null,
   };
 
   const cv = document.getElementById('cv');
@@ -151,6 +156,16 @@
       ctx.stroke();
       ctx.restore();
     }
+    if (S.cropDragStart && S.cropDragCur) {
+      const a = i2s(S.cropDragStart), b = i2s(S.cropDragCur);
+      ctx.save();
+      ctx.setLineDash([8, 5]);
+      ctx.strokeStyle = '#ff9800';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y),
+                     Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+      ctx.restore();
+    }
     if (S.crop) {
       const a = i2s({ x: S.crop.x0, y: S.crop.y0 });
       const b = i2s({ x: S.crop.x1, y: S.crop.y1 });
@@ -161,6 +176,12 @@
       ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y),
                      Math.abs(b.x - a.x), Math.abs(b.y - a.y));
       ctx.restore();
+    }
+    if (S.addFrom) {
+      const q = i2s(S.addFrom);
+      ctx.fillStyle = '#ff9800';
+      ctx.beginPath(); ctx.arc(q.x, q.y, 7, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
     }
     if (S.anchor) {
       const q = i2s(S.anchor);
@@ -291,197 +312,543 @@
   }
 
   // ---------- 自动描线（附图：单线灰度） ----------
-  function autoTrace(useCrop) {
-    if (!S.img) { setStatus('先打开图纸'); return; }
-    const maxW = 1500;
-    const k = Math.min(1, maxW / S.img.width);
-    const w = Math.max(1, Math.round(S.img.width * k));
-    const h = Math.max(1, Math.round(S.img.height * k));
-    const off = document.createElement('canvas');
-    off.width = w; off.height = h;
-    const octx = off.getContext('2d');
-    octx.drawImage(S.img, 0, 0, w, h);
-    const data = octx.getImageData(0, 0, w, h).data;
-    const dark = new Uint8Array(w * h);
-    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+  // 合并同一面墙的两条平行线（1~4px 内的重复线）
+  function dedupeParallel(segs, tol, overlapRatio) {
+    const H = segs.filter(s => Math.abs(s.a.y - s.b.y) < Math.abs(s.a.x - s.b.x));
+    const V = segs.filter(s => !(Math.abs(s.a.y - s.b.y) < Math.abs(s.a.x - s.b.x)));
+    function collapse(group, vertical) {
+      group = group.map(s => {
+        const a0 = vertical ? Math.min(s.a.y, s.b.y) : Math.min(s.a.x, s.b.x);
+        const a1 = vertical ? Math.max(s.a.y, s.b.y) : Math.max(s.a.x, s.b.x);
+        const c = vertical ? (s.a.x + s.b.x) / 2 : (s.a.y + s.b.y) / 2;
+        return { a0, a1, c };
+      }).sort((p, q) => p.c - q.c || p.a0 - q.a0);
+      const out = [];
+      for (const s of group) {
+        let merged = false;
+        for (const o of out) {
+          if (Math.abs(o.c - s.c) <= tol) {
+            const ov = Math.min(o.a1, s.a1) - Math.max(o.a0, s.a0);
+            const shorter = Math.min(o.a1 - o.a0, s.a1 - s.a0);
+            if (shorter > 0 && ov > overlapRatio * shorter) {
+              const l1 = Math.max(1, o.a1 - o.a0), l2 = Math.max(1, s.a1 - s.a0);
+              o.c = (o.c * l1 + s.c * l2) / (l1 + l2);
+              o.a0 = Math.min(o.a0, s.a0);
+              o.a1 = Math.max(o.a1, s.a1);
+              merged = true;
+              break;
+            }
+          }
+        }
+        if (!merged) out.push({ ...s });
+      }
+      return out.map(o => vertical
+        ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: '' }
+        : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: '' });
+    }
+    return collapse(H, false).concat(collapse(V, true));
+  }
+
+  // 合并共线（同一直线上断开的两段）
+  function mergeCollinear(segs, ctol, gap) {
+    const H = segs.filter(s => Math.abs(s.a.y - s.b.y) < Math.abs(s.a.x - s.b.x));
+    const V = segs.filter(s => !(Math.abs(s.a.y - s.b.y) < Math.abs(s.a.x - s.b.x)));
+    function merge(group, vertical) {
+      group = group.map(s => {
+        const a0 = vertical ? Math.min(s.a.y, s.b.y) : Math.min(s.a.x, s.b.x);
+        const a1 = vertical ? Math.max(s.a.y, s.b.y) : Math.max(s.a.x, s.b.x);
+        const c = vertical ? (s.a.x + s.b.x) / 2 : (s.a.y + s.b.y) / 2;
+        return { a0, a1, c };
+      }).sort((p, q) => p.c - q.c || p.a0 - q.a0);
+      const out = [];
+      for (const s of group) {
+        let merged = false;
+        for (const o of out) {
+          if (Math.abs(o.c - s.c) <= ctol && s.a0 <= o.a1 + gap && s.a1 >= o.a0 - gap) {
+            const l1 = Math.max(1, o.a1 - o.a0), l2 = Math.max(1, s.a1 - s.a0);
+            o.c = (o.c * l1 + s.c * l2) / (l1 + l2);
+            o.a0 = Math.min(o.a0, s.a0);
+            o.a1 = Math.max(o.a1, s.a1);
+            merged = true;
+            break;
+          }
+        }
+        if (!merged) out.push({ ...s });
+      }
+      return out.map(o => vertical
+        ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: '' }
+        : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: '' });
+    }
+    return merge(H, false).concat(merge(V, true));
+  }
+
+  function traceLinesJS(useCrop) {
+    const stats = {}; window.__traceStats = stats;
+    const W = S.img.width, H = S.img.height;
+    const cvs = document.createElement('canvas');
+    cvs.width = W; cvs.height = H;
+    const cx = cvs.getContext('2d');
+    cx.drawImage(S.img, 0, 0);
+    const data = cx.getImageData(0, 0, W, H).data;
+    const bin = new Uint8Array(W * H);
+    for (let i = 0, p4 = 0; p4 < W * H; p4++, i += 4) {
       const r = data[i], g = data[i + 1], b = data[i + 2];
-      const v = Math.max(r, g, b);
-      const sat = v - Math.min(r, g, b);
-      if (v < 175 && !(sat > 90 && v > 120)) dark[p] = 1; // 深色且不太艳
+      const gray = (r + g + b) / 3;
+      const red = r > 120 && r - g > 40 && r - b > 40;
+      bin[p4] = gray < 165 && !red ? 1 : 0;
     }
-
-    const hLines = [];
-    const minRun = 16;
-    for (let y = 0; y < h; y++) {
-      let x = 0;
-      while (x < w) {
-        if (!dark[y * w + x]) { x++; continue; }
-        const x0 = x;
-        while (x < w && dark[y * w + x]) x++;
-        const x1 = x - 1;
-        if (x1 - x0 + 1 >= minRun) {
-          // 并入上一行的线
-          let merged = false;
-          for (let j = hLines.length - 1; j >= 0 && j >= hLines.length - 8; j--) {
-            const L = hLines[j];
-            if (L.lastY === y - 1) {
-              const ov = Math.min(L.x1, x1) - Math.max(L.x0, x0);
-              if (ov > 0.5 * Math.min(L.x1 - L.x0 + 1, x1 - x0 + 1)) {
-                L.x0 = Math.min(L.x0, x0); L.x1 = Math.max(L.x1, x1);
-                L.lastY = y; merged = true; break;
-              }
-            }
-          }
-          if (!merged) hLines.push({ x0, x1, y0: y, lastY: y });
-        }
-      }
-    }
-
-    const vLines = [];
-    for (let x = 0; x < w; x++) {
-      let y = 0;
-      while (y < h) {
-        if (!dark[y * w + x]) { y++; continue; }
-        const y0 = y;
-        while (y < h && dark[y * w + x]) y++;
-        const y1 = y - 1;
-        if (y1 - y0 + 1 >= minRun) {
-          let merged = false;
-          for (let j = vLines.length - 1; j >= 0 && j >= vLines.length - 8; j--) {
-            const L = vLines[j];
-            if (L.lastX === x - 1) {
-              const ov = Math.min(L.y1, y1) - Math.max(L.y0, y0);
-              if (ov > 0.5 * Math.min(L.y1 - L.y0 + 1, y1 - y0 + 1)) {
-                L.y0 = Math.min(L.y0, y0); L.y1 = Math.max(L.y1, y1);
-                L.lastX = x; merged = true; break;
-              }
-            }
-          }
-          if (!merged) vLines.push({ y0, y1, x0: x, lastX: x });
-        }
-      }
-    }
-
-    const scale = S.img.width / w;
-    const segs = [];
-    hLines.forEach(L => {
-      if (L.x1 - L.x0 >= 20) {
-        const y = ((L.y0 + L.lastY) / 2) * scale;
-        segs.push({ a: { x: L.x0 * scale, y }, b: { x: L.x1 * scale, y }, len: null, adj: '' });
-      }
-    });
-    vLines.forEach(L => {
-      if (L.y1 - L.y0 >= 20) {
-        const x = ((L.x0 + L.lastX) / 2) * scale;
-        segs.push({ a: { x, y: L.y0 * scale }, b: { x, y: L.y1 * scale }, len: null, adj: '' });
-      }
-    });
+    let rx0 = 0, ry0 = 0, rx1 = W, ry1 = H;
     if (useCrop && S.crop) {
-      const c = S.crop;
-      const keep = segs.filter(s => {
-        const mx = (s.a.x + s.b.x) / 2, my = (s.a.y + s.b.y) / 2;
-        return mx >= Math.min(c.x0, c.x1) && mx <= Math.max(c.x0, c.x1)
-            && my >= Math.min(c.y0, c.y1) && my <= Math.max(c.y0, c.y1);
-      });
-      segs.length = 0; Array.prototype.push.apply(segs, keep);
+      rx0 = Math.max(0, Math.floor(Math.min(S.crop.x0, S.crop.x1)));
+      ry0 = Math.max(0, Math.floor(Math.min(S.crop.y0, S.crop.y1)));
+      rx1 = Math.min(W, Math.ceil(Math.max(S.crop.x0, S.crop.x1)));
+      ry1 = Math.min(H, Math.ceil(Math.max(S.crop.y0, S.crop.y1)));
+    } else {
+      const vlong = openRunsV(bin, W, H, Math.floor(H * 0.45));
+      const hlong = openRunsH(bin, W, H, Math.floor(W * 0.45));
+      const colHit = new Int32Array(W);
+      const rowHit = new Int32Array(H);
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          if (vlong[y * W + x]) colHit[x]++;
+          if (hlong[y * W + x]) rowHit[y]++;
+        }
+      }
+      const vcols = [], hrows = [];
+      for (let x = 0; x < W; x++) if (colHit[x] > H * 0.25) vcols.push(x);
+      for (let y = 0; y < H; y++) if (rowHit[y] > W * 0.25) hrows.push(y);
+      if (vcols.length >= 2 && hrows.length >= 2) {
+        const left = Math.min(...vcols), right = Math.max(...vcols);
+        const top = Math.min(...hrows), bot = Math.max(...hrows);
+        if (left < W * 0.15 && right > W * 0.85 && top < H * 0.15 && bot > H * 0.85) {
+          rx0 = Math.max(0, left + 6); ry0 = Math.max(0, top + 6);
+          rx1 = Math.min(W, right - 6); ry1 = Math.min(H, bot - 6);
+        }
+      }
     }
-    if (!segs.length) { setStatus('自动描线：没找到线条（检查框选范围）'); return; }
+    stats.region = [rx0, ry0, rx1, ry1];
+    const sw = rx1 - rx0, sh = ry1 - ry0;
+    if (sw < 10 || sh < 10) return [];
+    const sub = new Uint8Array(sw * sh);
+    for (let y = 0; y < sh; y++) {
+      const srcBase = (ry0 + y) * W + rx0;
+      const dstBase = y * sw;
+      for (let x = 0; x < sw; x++) sub[dstBase + x] = bin[srcBase + x];
+    }
+    const extract = (klen, minlen) => {
+      const hor = openRunsH(sub, sw, sh, klen);
+      const ver = openRunsV(sub, sw, sh, klen);
+      const out = [];
+      for (const bb of boxes(hor, sw, sh, minlen, 1)) {
+        if (!useCrop && bb.w > sw * 0.9) continue;
+        if (!useCrop && bb.y > sh * 0.66) continue;
+        out.push({ typ: 'H', a0: bb.x, a1: bb.x + bb.w, c: bb.y + bb.h / 2 });
+      }
+      for (const bb of boxes(ver, sw, sh, 1, minlen)) {
+        if (!useCrop && bb.h > sh * 0.9) continue;
+        if (!useCrop && bb.x > sw * 0.66 && bb.y > sh * 0.6) continue;
+        out.push({ typ: 'V', a0: bb.y, a1: bb.y + bb.h, c: bb.x + bb.w / 2 });
+      }
+      return out;
+    };
+    let segs = extract(25, 30);
+    stats.long = segs.length;
+    if (useCrop && S.crop) {
+      const shorts = extract(10, 15);
+      const ep = (s) => s.typ === 'H' ? [[s.a0, s.c], [s.a1, s.c]] : [[s.c, s.a0], [s.c, s.a1]];
+      const accepted = segs.slice();
+      let changed = true;
+      while (changed && shorts.length) {
+        changed = false;
+        const endpts = [];
+        accepted.forEach(acc => ep(acc).forEach(q => endpts.push(q)));
+        for (let i = shorts.length - 1; i >= 0; i--) {
+          const s = shorts[i];
+          const ok = ep(s).some(p => endpts.some(q => Math.hypot(p[0] - q[0], p[1] - q[1]) <= 12));
+          if (ok) { accepted.push(s); shorts.splice(i, 1); changed = true; }
+        }
+      }
+      segs = accepted;
+      stats.withShorts = segs.length;
+    }
+    const dedupe = (items) => {
+      const out = [];
+      for (const s of items) {
+        let dup = false;
+        for (const o of out) {
+          if (o.typ === s.typ && Math.abs(o.c - s.c) <= 4) {
+            const lo = Math.max(s.a0, o.a0), hi = Math.min(s.a1, o.a1);
+            if (hi - lo > 0.6 * Math.min(s.a1 - s.a0, o.a1 - o.a0)) { dup = true; break; }
+          }
+        }
+        if (!dup) out.push({ ...s });
+      }
+      return out;
+    };
+    const mergeCollinear = (items, ctol = 12, gap = 30) => {
+      const sorted = items.slice().sort((p, q) => (p.typ < q.typ ? -1 : p.typ > q.typ ? 1 : p.c - q.c || p.a0 - q.a0));
+      const out = [];
+      for (const s of sorted) {
+        let placed = false;
+        for (const o of out) {
+          if (o.typ === s.typ && Math.abs(o.c - s.c) <= ctol &&
+              s.a0 <= o.a1 + gap && s.a1 >= o.a0 - gap) {
+            const l1 = Math.max(1, o.a1 - o.a0), l2 = Math.max(1, s.a1 - s.a0);
+            o.c = (o.c * l1 + s.c * l2) / (l1 + l2);
+            o.a0 = Math.min(o.a0, s.a0);
+            o.a1 = Math.max(o.a1, s.a1);
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) out.push({ ...s });
+      }
+      return out;
+    };
+    const snapCorners = (items, tol = 12) => {
+      const Hs = items.filter(s => s.typ === 'H').map(s => ({ ...s }));
+      const Vs = items.filter(s => s.typ === 'V').map(s => ({ ...s }));
+      for (const h of Hs) for (const v of Vs) {
+        const x = v.c, y = h.c;
+        if (h.a0 - tol <= x && x <= h.a1 + tol && v.a0 - tol <= y && y <= v.a1 + tol) {
+          if (h.a0 - x >= 0 && h.a0 - x <= tol) h.a0 = x;
+          if (x - h.a1 >= 0 && x - h.a1 <= tol) h.a1 = x;
+          if (v.a0 - y >= 0 && v.a0 - y <= tol) v.a0 = y;
+          if (y - v.a1 >= 0 && y - v.a1 <= tol) v.a1 = y;
+        }
+      }
+      return Hs.concat(Vs);
+    };
+    const closeLoop = (items, maxext = 120, minlenTarget = 25) => {
+      let cur = items.map(s => ({ ...s }));
+      for (let iter = 0; iter < 6; iter++) {
+        const Hs = cur.filter(s => s.typ === 'H');
+        const Vs = cur.filter(s => s.typ === 'V');
+        let changed = false;
+        for (const h of Hs) {
+          const y = h.c;
+          for (const side of ['L', 'R']) {
+            const touching = Vs.some(v => Math.abs(v.c - (side === 'R' ? h.a1 : h.a0)) <= 10 &&
+                                       v.a0 - 10 <= y && y <= v.a1 + 10);
+            if (touching) continue;
+            let best = null;
+            for (const v of Vs) {
+              if (v.a1 - v.a0 < minlenTarget) continue;
+              const x = v.c;
+              let dist;
+              if (side === 'R') { if (x <= h.a1 + 1) continue; dist = x - h.a1; }
+              else { if (x >= h.a0 - 1) continue; dist = h.a0 - x; }
+              if (dist > maxext || dist <= 0) continue;
+              if (!(v.a0 - maxext <= y && y <= v.a1 + maxext)) continue;
+              if (!best || dist < best.dist) best = { dist, v };
+            }
+            if (best) {
+              if (side === 'R') h.a1 = best.v.c; else h.a0 = best.v.c;
+              if (y < best.v.a0) best.v.a0 = y;
+              else if (y > best.v.a1) best.v.a1 = y;
+              changed = true;
+            }
+          }
+        }
+        for (const v of Vs) {
+          const x = v.c;
+          for (const side of ['T', 'B']) {
+            const touching = Hs.some(h => Math.abs(h.c - (side === 'B' ? v.a1 : v.a0)) <= 10 &&
+                                       h.a0 - 10 <= x && x <= h.a1 + 10);
+            if (touching) continue;
+            let best = null;
+            for (const h of Hs) {
+              if (h.a1 - h.a0 < minlenTarget) continue;
+              const y = h.c;
+              let dist;
+              if (side === 'B') { if (y <= v.a1 + 1) continue; dist = y - v.a1; }
+              else { if (y >= v.a0 - 1) continue; dist = v.a0 - y; }
+              if (dist > maxext || dist <= 0) continue;
+              if (!(h.a0 - maxext <= x && x <= h.a1 + maxext)) continue;
+              if (!best || dist < best.dist) best = { dist, h };
+            }
+            if (best) {
+              if (side === 'B') v.a1 = best.h.c; else v.a0 = best.h.c;
+              if (x < best.h.a0) best.h.a0 = x;
+              else if (x > best.h.a1) best.h.a1 = x;
+              changed = true;
+            }
+          }
+        }
+        cur = Hs.map(s => ({ ...s })).concat(Vs.map(s => ({ ...s })));
+        if (!changed) break;
+      }
+      return cur;
+    };
+    segs = dedupe(segs); stats.deduped = segs.length;
+    segs = mergeCollinear(segs); stats.merged = segs.length;
+    segs = snapCorners(segs, 12); stats.snapped = segs.length;
+    segs = closeLoop(segs); stats.closed = segs.length;
+    const isConnected = (s, others) => {
+      const pts = s.typ === 'H' ? [[s.a0, s.c], [s.a1, s.c]] : [[s.c, s.a0], [s.c, s.a1]];
+      for (const o of others) {
+        if (o === s || o.typ === s.typ) continue;
+        for (const [px, py] of pts) {
+          if (o.typ === 'H') {
+            if (o.a0 - 12 <= px && px <= o.a1 + 12 && Math.abs(py - o.c) <= 12) return true;
+          } else {
+            if (o.a0 - 12 <= py && py <= o.a1 + 12 && Math.abs(px - o.c) <= 12) return true;
+          }
+        }
+      }
+      return false;
+    };
+    segs = segs.filter(s => isConnected(s, segs) || (s.a1 - s.a0) >= 100);
+    stats.connected = segs.length;
+    segs = segs.filter(s => (s.a1 - s.a0) >= 4); stats.len4 = segs.length;
+    segs = dedupe(segs);
+    // 电脑版最后一步：裁掉外侧图框 / 底部表格 / 标题下的长横线
+    if (!useCrop) {
+      segs = segs.filter(s => {
+        if (s.typ === 'H') {
+          const my = s.c + ry0;
+          const length = s.a1 - s.a0;
+          if (my < H * 0.18 || my > H * 0.70) return false;
+          if (my < H * 0.25 && length > W * 0.55) return false;
+        } else {
+          const mx = s.c + rx0;
+          if (mx < W * 0.10 || mx > W * 0.85) return false;
+        }
+        return true;
+      });
+    }
+    stats.final = segs.length;
+    return segs.map(s => s.typ === 'H'
+      ? { a: { x: s.a0 + rx0, y: s.c + ry0 }, b: { x: s.a1 + rx0, y: s.c + ry0 }, len: null, adj: '' }
+      : { a: { x: s.c + rx0, y: s.a0 + ry0 }, b: { x: s.c + rx0, y: s.a1 + ry0 }, len: null, adj: '' });
+  }
+
+  function autoTrace(useCrop, returnOnly) {
+    if (!S.img) { setStatus('先打开图纸'); return; }
+    const segs = traceLinesJS(useCrop);
+    if (!segs.length) { setStatus('没描到线，可能图片太淡或阈值不合适'); return; }
+    if (returnOnly) return segs;
     pushUndo();
     S.segments = segs.slice(0, 600);
     S.notes = []; S.selected = null;
     S.mode = 'select';
     document.querySelectorAll('#toolbar [data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === 'select'));
     render(); refreshList();
-    setStatus(`自动描线完成：${S.segments.length} 条（横 ${hLines.length} / 竖 ${vLines.length}）`);
+    setStatus(`识别完成：${S.segments.length} 条`);
   }
 
   // ---------- 内部识别（白区泛洪 + 轮廓） ----------
+  function ptSegDist(px, py, ax, ay, bx, by) {
+    const abx = bx - ax, aby = by - ay;
+    const L2 = abx * abx + aby * aby || 1;
+    let tt = ((px - ax) * abx + (py - ay) * aby) / L2;
+    tt = Math.max(0, Math.min(1, tt));
+    return Math.hypot(px - (ax + abx * tt), py - (ay + aby * tt));
+  }
+
+  // 逐行“闭运算”：把间隔 <= gap 的段接起来
+  function closeRunsH(mask, w, h, gap) {
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      let x = 0;
+      const base = y * w;
+      while (x < w) {
+        if (!mask[base + x]) { x++; continue; }
+        let start = x, end = x, i = x;
+        while (i < w) {
+          if (mask[base + i]) { end = i; i++; continue; }
+          let j = i;
+          while (j < w && !mask[base + j]) j++;
+          if (j < w && j - i <= gap) { i = j; continue; }
+          break;
+        }
+        for (let k = start; k <= end; k++) out[base + k] = 1;
+        x = end + 1;
+      }
+    }
+    return out;
+  }
+
+  function openRunsH(mask, w, h, minLen) {
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const base = y * w;
+      let x = 0;
+      while (x < w) {
+        if (!mask[base + x]) { x++; continue; }
+        const s = x;
+        while (x < w && mask[base + x]) x++;
+        if (x - s >= minLen) for (let k = s; k < x; k++) out[base + k] = 1;
+      }
+    }
+    return out;
+  }
+
+  function closeRunsV(mask, w, h, gap) {
+    const out = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) {
+      let y = 0;
+      while (y < h) {
+        if (!mask[y * w + x]) { y++; continue; }
+        let start = y, end = y, i = y;
+        while (i < h) {
+          if (mask[i * w + x]) { end = i; i++; continue; }
+          let j = i;
+          while (j < h && !mask[j * w + x]) j++;
+          if (j < h && j - i <= gap) { i = j; continue; }
+          break;
+        }
+        for (let k = start; k <= end; k++) out[k * w + x] = 1;
+        y = end + 1;
+      }
+    }
+    return out;
+  }
+
+  function openRunsV(mask, w, h, minLen) {
+    const out = new Uint8Array(w * h);
+    for (let x = 0; x < w; x++) {
+      let y = 0;
+      while (y < h) {
+        if (!mask[y * w + x]) { y++; continue; }
+        const s = y;
+        while (y < h && mask[y * w + x]) y++;
+        if (y - s >= minLen) for (let k = s; k < y; k++) out[k * w + x] = 1;
+      }
+    }
+    return out;
+  }
+
+  // 连通块外接框（4 连通）
+  function boxes(mask, w, h, minW, minH) {
+    const seen = new Uint8Array(w * h);
+    const res = [];
+    const stack = [];
+    for (let i = 0; i < w * h; i++) {
+      if (!mask[i] || seen[i]) continue;
+      stack.length = 0;
+      stack.push(i);
+      seen[i] = 1;
+      let minX = w, minY = h, maxX = 0, maxY = 0;
+      while (stack.length) {
+        const q = stack.pop();
+        const qx = q % w, qy = (q / w) | 0;
+        if (qx < minX) minX = qx;
+        if (qx > maxX) maxX = qx;
+        if (qy < minY) minY = qy;
+        if (qy > maxY) maxY = qy;
+        const nb = [q - 1, q + 1, q - w, q + w];
+        for (const n of nb) {
+          if (n < 0 || n >= w * h) continue;
+          if ((n === q - 1 && qx === 0) || (n === q + 1 && qx === w - 1)) continue;
+          if (!seen[n] && mask[n]) { seen[n] = 1; stack.push(n); }
+        }
+      }
+      const bw = maxX - minX + 1, bh = maxY - minY + 1;
+      if (bw >= minW && bh >= minH) res.push({ x: minX, y: minY, w: bw, h: bh });
+    }
+    return res;
+  }
+
   function interiorRecognize() {
+    if (!S.segments.length) { setStatus('先用「框选识别」识别出外框'); return; }
     if (!S.img) { setStatus('先打开图纸'); return; }
-    const c = S.crop;
-    const maxW = 1200;
-    const k = Math.min(1, maxW / S.img.width);
-    const w = Math.max(1, Math.round(S.img.width * k));
-    const h = Math.max(1, Math.round(S.img.height * k));
-    const off = document.createElement('canvas');
-    off.width = w; off.height = h;
-    const octx = off.getContext('2d');
-    octx.drawImage(S.img, 0, 0, w, h);
-    const data = octx.getImageData(0, 0, w, h).data;
-    const dark = new Uint8Array(w * h);
-    for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-      const v = Math.max(data[i], data[i + 1], data[i + 2]);
-      dark[p] = v < 175 ? 1 : 0;
-    }
-    let seed;
-    if (c) {
-      seed = { x: Math.round((c.x0 + c.x1) / 2 * k), y: Math.round((c.y0 + c.y1) / 2 * k) };
-    } else {
-      seed = { x: Math.round(w / 2), y: Math.round(h / 2) };
-    }
-    if (seed.x < 0 || seed.x >= w || seed.y < 0 || seed.y >= h) { setStatus('框选范围无效'); return; }
-    // 若种子落在线上，向周围找一个白点
-    if (dark[seed.y * w + seed.x]) {
-      outer: for (let r = 1; r < 30; r++) {
-        for (let dx = -r; dx <= r; dx++) {
-          for (let dy = -r; dy <= r; dy++) {
-            const x = seed.x + dx, y = seed.y + dy;
-            if (x >= 0 && x < w && y >= 0 && y < h && !dark[y * w + x]) { seed = { x, y }; break outer; }
-          }
-        }
-      }
-    }
-    const region = new Uint8Array(w * h);
-    const stack = [seed];
-    region[seed.y * w + seed.x] = 1;
-    const maxPix = Math.round(w * h * 0.6);
-    let cnt = 0;
-    while (stack.length && cnt < maxPix) {
-      const q = stack.pop();
-      cnt++;
-      const x = q.x, y = q.y;
-      const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-      for (const [dx, dy] of nb) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue;
-        const idx = ny * w + nx;
-        if (region[idx] || dark[idx]) continue;
-        region[idx] = 1;
-        stack.push({ x: nx, y: ny });
-      }
-    }
-    // 边界点
-    const bpts = [];
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        if (!region[y * w + x]) continue;
-        if (!region[(y - 1) * w + x] || !region[(y + 1) * w + x] ||
-            !region[y * w + x - 1] || !region[y * w + x + 1]) {
-          bpts.push({ x, y });
-        }
-      }
-    }
-    if (bpts.length < 30) { setStatus('内部识别：没有找到封闭内部区域'); return; }
-    // 采样 + 简化：按角度贪心走一圈
-    const step = Math.max(1, Math.floor(bpts.length / 400));
-    const pts = bpts.filter((_, i) => i % step === 0);
-    const ordered = [pts[0]];
-    const used = new Set([0]);
-    let cur = pts[0];
-    for (let n = 1; n < Math.min(pts.length, 200); n++) {
-      let bi = -1, bd = 1e9;
-      pts.forEach((p, i) => {
-        if (used.has(i)) return;
-        const d = (p.x - cur.x) ** 2 + (p.y - cur.y) ** 2;
-        if (d < bd) { bd = d; bi = i; }
+    const outer = S.segments.slice();
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    outer.forEach(sg => {
+      [sg.a, sg.b].forEach(p => {
+        minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x);
+        miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y);
       });
-      if (bi < 0 || bd > 60 * 60) break;
-      used.add(bi); ordered.push(pts[bi]); cur = pts[bi];
+    });
+    const W = S.img.width, H = S.img.height;
+    const off = document.createElement('canvas');
+    off.width = W; off.height = H;
+    const octx = off.getContext('2d');
+    octx.drawImage(S.img, 0, 0);
+    const data = octx.getImageData(0, 0, W, H).data;
+
+    let x0 = 0, y0 = 0, x1 = W, y1 = H;
+    if (S.crop) {
+      x0 = Math.max(0, Math.floor(Math.min(S.crop.x0, S.crop.x1)));
+      y0 = Math.max(0, Math.floor(Math.min(S.crop.y0, S.crop.y1)));
+      x1 = Math.min(W, Math.ceil(Math.max(S.crop.x0, S.crop.x1)));
+      y1 = Math.min(H, Math.ceil(Math.max(S.crop.y0, S.crop.y1)));
     }
-    if (ordered.length < 3) { setStatus('内部识别：轮廓提取失败'); return; }
-    S.interior = ordered.map(p => ({ x: p.x / k, y: p.y / k }));
-    setStatus(`内部识别完成：轮廓 ${S.interior.length} 个点，可用「画轮廓」变成线段`);
-    render();
+    const cw = x1 - x0, ch = y1 - y0;
+    const bin = new Uint8Array(cw * ch);
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const idx = ((y0 + y) * W + (x0 + x)) * 4;
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+        const gray = (r + g + b) / 3;
+        const red = r > 120 && r - g > 40 && r - b > 40;
+        if (gray < 190 && !red) bin[y * cw + x] = 1;
+      }
+    }
+    const hop = openRunsH(closeRunsH(bin, cw, ch, 24), cw, ch, 10);
+    const vop = openRunsV(closeRunsV(bin, cw, ch, 24), cw, ch, 10);
+
+    const cand = [];
+    for (const bb of boxes(hop, cw, ch, 50, 1)) {
+      const mx = x0 + bb.x + bb.w / 2;
+      const my = y0 + bb.y + bb.h / 2;
+      if (mx < minx + 8 || mx > maxx - 8 || my < miny + 8 || my > maxy - 8) continue;
+      let a0 = x0 + bb.x, a1 = x0 + bb.x + bb.w;
+      a0 = Math.max(minx, Math.min(maxx, a0));
+      a1 = Math.max(minx, Math.min(maxx, a1));
+      cand.push({ typ: 'H', a0, a1, c: my });
+    }
+    for (const bb of boxes(vop, cw, ch, 1, 50)) {
+      const mx = x0 + bb.x + bb.w / 2;
+      const my = y0 + bb.y + bb.h / 2;
+      if (mx < minx + 8 || mx > maxx - 8 || my < miny + 8 || my > maxy - 8) continue;
+      let a0 = y0 + bb.y, a1 = y0 + bb.y + bb.h;
+      a0 = Math.max(miny, Math.min(maxy, a0));
+      a1 = Math.max(miny, Math.min(maxy, a1));
+      cand.push({ typ: 'V', a0, a1, c: mx });
+    }
+    // 去掉与外框重复
+    const farFromOuter = (s) => {
+      const px = s.typ === 'H' ? (s.a0 + s.a1) / 2 : s.c;
+      const py = s.typ === 'H' ? s.c : (s.a0 + s.a1) / 2;
+      for (const o of outer) {
+        const oh = Math.abs(o.a.y - o.b.y) < Math.abs(o.a.x - o.b.x);
+        if (s.typ === 'H' && oh) {
+          if (Math.abs(py - o.a.y) <= 6 && px >= Math.min(o.a.x, o.b.x) - 6 && px <= Math.max(o.a.x, o.b.x) + 6) return false;
+        }
+        if (s.typ === 'V' && !oh) {
+          if (Math.abs(px - o.a.x) <= 6 && py >= Math.min(o.a.y, o.b.y) - 6 && py <= Math.max(o.a.y, o.b.y) + 6) return false;
+        }
+      }
+      return true;
+    };
+    const cand2 = cand.filter(farFromOuter);
+    // 连接/长度过滤
+    const segList = outer.map(sg => ({ a: sg.a, b: sg.b }));
+    const connected = (px, py, list, tol) =>
+      list.some(s => ptSegDist(px, py, s.a.x, s.a.y, s.b.x, s.b.y) <= tol);
+    const kept = [];
+    for (const s of cand2) {
+      const pA = s.typ === 'H' ? { x: s.a0, y: s.c } : { x: s.c, y: s.a0 };
+      const pB = s.typ === 'H' ? { x: s.a1, y: s.c } : { x: s.c, y: s.a1 };
+      const L = Math.hypot(pB.x - pA.x, pB.y - pA.y);
+      const pool = segList.concat(kept.map(k => ({ a: k.a, b: k.b })));
+      if ((connected(pA.x, pA.y, pool, 14) && connected(pB.x, pB.y, pool, 14)) || L >= 250) {
+        kept.push({ a: pA, b: pB, len: null, adj: '' });
+      }
+    }
+    if (!kept.length) {
+      setStatus('内部线都悬空或与外框重合，未添加');
+      return;
+    }
+    pushUndo();
+    S.interiorStart = S.segments.length;
+    S.interior = null;
+    S.segments.push(...kept);
+    S.selected = null;
+    render(); refreshList();
+    setStatus(`内部识别：新增 ${kept.length} 条内部线（可点「撤回内部」撤销）`);
   }
 
   function interiorToSegments() {
@@ -499,76 +866,92 @@
     setStatus('已把内部轮廓转成线段');
   }
 
-  function closeLoop() {
-    if (S.segments.length < 2) { setStatus('线段太少'); return; }
-    const key = p => `${Math.round(p.x / 3)},${Math.round(p.y / 3)}`;
-    const deg = new Map();
-    S.segments.forEach(sg => {
-      [sg.a, sg.b].forEach(p => {
-        const k = key(p);
-        deg.set(k, (deg.get(k) || 0) + 1);
-      });
+  function distToSeg(p, a, b) {
+    const abx = b.x - a.x, aby = b.y - a.y;
+    const L2 = abx * abx + aby * aby || 1;
+    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / L2;
+    t = Math.max(0, Math.min(1, t));
+    const qx = a.x + abx * t, qy = a.y + aby * t;
+    return { d: Math.hypot(p.x - qx, p.y - qy), t };
+  }
+
+  function hitSegment(pt) {
+    let best = null;
+    S.segments.forEach((sg, i) => {
+      const a = i2s(sg.a), b = i2s(sg.b);
+      const r = distToSeg(pt, a, b);
+      if (r.d <= 24 && (!best || r.d < best.d)) best = { idx: i, d: r.d, t: r.t };
     });
-    const ends = [];
-    S.segments.forEach(sg => {
-      [sg.a, sg.b].forEach(p => { if (deg.get(key(p)) === 1) ends.push(p); });
+    return best;
+  }
+
+  function hitNote(pt) {
+    let best = null;
+    S.notes.forEach((nt, i) => {
+      const q = i2s(nt.pos);
+      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
+      if (d <= 30 && (!best || d < best.d)) best = { idx: i, d };
     });
-    if (ends.length < 2) { setStatus('没有可闭合的开口端点'); return; }
+    return best ? best.idx : null;
+  }
+
+  function splitSegment(i, t) {
+    const sg = S.segments[i];
+    if (t < 0.08 || t > 0.92) { setStatus('分割点太靠端点'); return; }
     pushUndo();
-    S.segments.push({ a: ends[0], b: ends[ends.length - 1], len: null, adj: '' });
-    render(); refreshList(); setStatus('已闭合端到端');
+    const pp = { x: sg.a.x + (sg.b.x - sg.a.x) * t, y: sg.a.y + (sg.b.y - sg.a.y) * t };
+    const s1 = { a: { ...sg.a }, b: { ...pp }, len: null, adj: sg.adj };
+    const s2 = { a: { ...pp }, b: { ...sg.b }, len: null, adj: sg.adj };
+    S.segments.splice(i, 1, s1, s2);
+    S.selected = { kind: 'seg', idx: i };
+    render(); refreshList(); setStatus('已分割');
   }
 
-  // ---------- 交互 ----------
-  function canvasPoint(e) {
-    const r = cv.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  // 把点吸附到已有横/竖线上（屏幕距离 <= tol）
+  function snapToLines(ip) {
+    let best = null;
+    for (const sg of S.segments) {
+      const ah = Math.abs(sg.a.y - sg.b.y) < Math.abs(sg.a.x - sg.b.x);
+      let qx, qy;
+      if (ah) {
+        qx = Math.max(Math.min(sg.a.x, sg.b.x), Math.min(Math.max(sg.a.x, sg.b.x), ip.x));
+        qy = sg.a.y;
+      } else {
+        qx = sg.a.x;
+        qy = Math.max(Math.min(sg.a.y, sg.b.y), Math.min(Math.max(sg.a.y, sg.b.y), ip.y));
+      }
+      const a = i2s({ x: qx, y: qy });
+      const d = Math.hypot(a.x - i2s(ip).x, a.y - i2s(ip).y);
+      if (d <= 30 && (!best || d < best.d)) best = { d, p: { x: qx, y: qy } };
+    }
+    return best ? best.p : ip;
   }
 
-  cv.addEventListener('pointerdown', (e) => {
-    cv.setPointerCapture(e.pointerId);
-    S.pointers.set(e.pointerId, canvasPoint(e));
-    S.moved = false;
-    if (S.pointers.size === 2) {
-      const pts = [...S.pointers.values()];
-      S.pinch = {
-        d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
-        mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
-      };
+  // 新线端点落到已有线上时，把已有线在该点断开（T 形接头）
+  function splitAtPointInAll(ip) {
+    const tol = 8;
+    for (let i = 0; i < S.segments.length; i++) {
+      const sg = S.segments[i];
+      const ah = Math.abs(sg.a.y - sg.b.y) < Math.abs(sg.a.x - sg.b.x);
+      if (ah) {
+        const lo = Math.min(sg.a.x, sg.b.x), hi = Math.max(sg.a.x, sg.b.x);
+        if (Math.abs(ip.y - sg.a.y) <= tol && lo + tol < ip.x && ip.x < hi - tol) {
+          const mid = { x: ip.x, y: sg.a.y };
+          S.segments[i] = { a: { ...sg.a }, b: { ...mid }, len: null, adj: sg.adj };
+          S.segments.splice(i + 1, 0, { a: { ...mid }, b: { ...sg.b }, len: null, adj: sg.adj });
+          i++;
+        }
+      } else {
+        const lo = Math.min(sg.a.y, sg.b.y), hi = Math.max(sg.a.y, sg.b.y);
+        if (Math.abs(ip.x - sg.a.x) <= tol && lo + tol < ip.y && ip.y < hi - tol) {
+          const mid = { x: sg.a.x, y: ip.y };
+          S.segments[i] = { a: { ...sg.a }, b: { ...mid }, len: null, adj: sg.adj };
+          S.segments.splice(i + 1, 0, { a: { ...mid }, b: { ...sg.b }, len: null, adj: sg.adj });
+          i++;
+        }
+      }
     }
-  });
-
-  cv.addEventListener('pointermove', (e) => {
-    if (!S.pointers.has(e.pointerId) || !S.img) return;
-    const prev = S.pointers.get(e.pointerId);
-    const now = canvasPoint(e);
-    S.pointers.set(e.pointerId, now);
-    if (S.pointers.size === 2 && S.pinch) {
-      const pts = [...S.pointers.values()];
-      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-      S.view.tx += mid.x - S.pinch.mid.x;
-      S.view.ty += mid.y - S.pinch.mid.y;
-      if (S.pinch.d > 10) zoomAt(mid, d / S.pinch.d);
-      S.pinch.d = d; S.pinch.mid = mid;
-      S.moved = true;
-      return;
-    }
-    const dx = now.x - prev.x, dy = now.y - prev.y;
-    if (Math.abs(dx) + Math.abs(dy) > 1) {
-      S.view.tx += dx; S.view.ty += dy;
-      S.moved = true;
-      render();
-    }
-  });
-
-  cv.addEventListener('pointerup', (e) => {
-    const pt = S.pointers.get(e.pointerId);
-    S.pointers.delete(e.pointerId);
-    if (S.pointers.size < 2) S.pinch = null;
-    if (pt && !S.moved && S.img) handleTap(pt);
-  });
-  cv.addEventListener('pointercancel', (e) => { S.pointers.delete(e.pointerId); S.pinch = null; });
+  }
 
   function handleTap(pt) {
     const ip = s2i(pt);
@@ -592,7 +975,7 @@
     if (S.mode === 'draw') {
       if (!S.anchor) {
         S.anchor = ip;
-        setStatus('手绘：继续点，相邻点自动连线；点「点选」或「清空」结束');
+        setStatus('手绘：继续点，相邻点自动连线');
         render();
         return;
       }
@@ -614,28 +997,76 @@
       }
       const first = S.pending;
       S.pending = null;
-      {
-        const mid = { x: (first.x + ip.x) / 2, y: (first.y + ip.y) / 2 };
-        const s = prompt('输入长度（米，可留空稍后填）');
-        let v = null;
-        if (s != null && s.trim() !== '') {
-          const n = parseFloat(s.replace(/m/ig, ''));
-          if (!isNaN(n)) v = n;
-        }
-        pushUndo();
-        S.notes.push({ pos: mid, a: first, b: ip, len: v, adj: '' });
-        S.selected = { kind: 'note', idx: S.notes.length - 1 };
-        setStatus('已放数字，可点选后按徕卡测量');
+      const mid = { x: (first.x + ip.x) / 2, y: (first.y + ip.y) / 2 };
+      const s = prompt('输入长度（米，可留空稍后填）');
+      let v = null;
+      if (s != null && s.trim() !== '') {
+        const n = parseFloat(String(s).replace(/m/ig, ''));
+        if (!isNaN(n)) v = n;
       }
+      pushUndo();
+      S.notes.push({ pos: mid, a: first, b: ip, len: v, adj: '' });
+      S.selected = { kind: 'note', idx: S.notes.length - 1 };
+      setStatus('已放数字，可点选后按徕卡测量');
       render(); refreshList();
       return;
     }
-    if (S.mode === 'split' || S.mode === 'addline') {
-      const hit = hitSegment(pt);
-      if (!hit) { setStatus('分割：没点中线段'); return; }
-      splitSegment(hit.idx, hit.t);
+
+    if (S.mode === 'addline') {
+      if (!S.addFrom) {
+        S.addFrom = snapToLines(ip);
+        setStatus('加线：起点已定，再点终点（自动吸附、横平竖直）');
+        render();
+        return;
+      }
+      const a = S.addFrom;
+      const b = snapToLines(ip);
+      S.addFrom = null;
+      let seg;
+      if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
+        seg = { a: { x: Math.min(a.x, b.x), y: a.y }, b: { x: Math.max(a.x, b.x), y: a.y } };
+      } else {
+        seg = { a: { x: a.x, y: Math.min(a.y, b.y) }, b: { x: a.x, y: Math.max(a.y, b.y) } };
+      }
+      if (Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y) < 4) return;
+      pushUndo();
+      splitAtPointInAll(seg.a);
+      splitAtPointInAll(seg.b);
+      S.segments.push({ a: { ...seg.a }, b: { ...seg.b }, len: null, adj: '' });
+      S.selected = { kind: 'seg', idx: S.segments.length - 1 };
+      render(); refreshList();
+      setStatus(`已加线并选中第 ${S.segments.length} 段，可直接测量`);
       return;
     }
+
+    if (S.mode === 'split') {
+      if (!S.selected || S.selected.kind !== 'seg') {
+        setStatus('分割：先点选一条线段，再点分割位置');
+        return;
+      }
+      const sg = S.segments[S.selected.idx];
+      const ah = Math.abs(sg.a.y - sg.b.y) < Math.abs(sg.a.x - sg.b.x);
+      let mid;
+      if (ah) {
+        mid = { x: Math.max(Math.min(sg.a.x, sg.b.x), Math.min(Math.max(sg.a.x, sg.b.x), ip.x)), y: sg.a.y };
+      } else {
+        mid = { x: sg.a.x, y: Math.max(Math.min(sg.a.y, sg.b.y), Math.min(Math.max(sg.a.y, sg.b.y), ip.y)) };
+      }
+      if (Math.hypot(mid.x - sg.a.x, mid.y - sg.a.y) < 4 ||
+          Math.hypot(mid.x - sg.b.x, mid.y - sg.b.y) < 4) {
+        setStatus('分割点太靠端点');
+        return;
+      }
+      pushUndo();
+      const idx = S.selected.idx;
+      S.segments[idx] = { a: { ...sg.a }, b: { ...mid }, len: null, adj: sg.adj };
+      S.segments.splice(idx + 1, 0, { a: { ...mid }, b: { ...sg.b }, len: null, adj: sg.adj });
+      S.selected = { kind: 'seg', idx: idx + 1 };
+      render(); refreshList();
+      setStatus('已切成两段，分别选中测量');
+      return;
+    }
+
     // 点选
     const hit = hitSegment(pt);
     if (hit) {
@@ -653,46 +1084,121 @@
     render(); refreshList();
   }
 
-  function distToSeg(p, a, b) {
-    const abx = b.x - a.x, aby = b.y - a.y;
-    const L2 = abx * abx + aby * aby || 1;
-    let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / L2;
-    t = Math.max(0, Math.min(1, t));
-    const qx = a.x + abx * t, qy = a.y + aby * t;
-    return { d: Math.hypot(p.x - qx, p.y - qy), t };
+  // ---------- 画布触摸/鼠标交互 ----------
+  function canvasPoint(e) {
+    const r = cv.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
-  function hitSegment(pt) {
-    let best = null;
-    S.segments.forEach((sg, i) => {
-      const a = i2s(sg.a), b = i2s(sg.b);
-      const r = distToSeg(pt, a, b);
-      if (r.d <= 14 && (!best || r.d < best.d)) best = { idx: i, d: r.d, t: r.t };
+  cv.addEventListener('pointerdown', (e) => {
+    cv.setPointerCapture(e.pointerId);
+    const pt = canvasPoint(e);
+    S.pointers.set(e.pointerId, pt);
+    S.moved = false;
+    S.downPt = pt;
+    if (S.pointers.size === 2) {
+      const pts = [...S.pointers.values()];
+      S.pinch = {
+        d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+        mid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
+      };
+    }
+    if (S.mode === 'crop' && S.img && S.pointers.size === 1) {
+      S.cropDragStart = s2i(pt);
+      S.cropDragCur = { ...S.cropDragStart };
+      render();
+    }
+  });
+
+  cv.addEventListener('pointermove', (e) => {
+    if (!S.pointers.has(e.pointerId) || !S.img) return;
+    const prev = S.pointers.get(e.pointerId);
+    const now = canvasPoint(e);
+    S.pointers.set(e.pointerId, now);
+    if (S.pointers.size === 2 && S.pinch) {
+      const pts = [...S.pointers.values()];
+      const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+      S.view.tx += mid.x - S.pinch.mid.x;
+      S.view.ty += mid.y - S.pinch.mid.y;
+      if (S.pinch.d > 10) zoomAt(mid, d / S.pinch.d);
+      S.pinch.d = d; S.pinch.mid = mid;
+      S.moved = true;
+      return;
+    }
+    if (S.mode === 'crop' && S.cropDragStart) {
+      S.cropDragCur = s2i(now);
+      render();
+      return;
+    }
+    const dx = now.x - prev.x, dy = now.y - prev.y;
+    const movedFromDown = Math.hypot(now.x - (S.downPt ? S.downPt.x : now.x),
+                                     now.y - (S.downPt ? S.downPt.y : now.y));
+    if (movedFromDown > 10) {
+      S.view.tx += dx; S.view.ty += dy;
+      S.moved = true;
+      render();
+    }
+  });
+
+  cv.addEventListener('pointerup', (e) => {
+    const pt = S.pointers.get(e.pointerId);
+    S.pointers.delete(e.pointerId);
+    if (S.pointers.size < 2) S.pinch = null;
+    if (S.mode === 'crop' && S.cropDragStart) {
+      const a = S.cropDragStart, b = S.cropDragCur || a;
+      const dist = Math.hypot((i2s(a).x - i2s(b).x), (i2s(a).y - i2s(b).y));
+      S.cropDragStart = null;
+      S.cropDragCur = null;
+      if (dist > 20) {
+        S.crop = {
+          x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y),
+          x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y),
+        };
+        setStatus('已框选范围（自动描线只识别框内）');
+        render();
+        return;
+      }
+      render();
+    }
+    if (pt && !S.moved && S.img) handleTap(pt);
+  });
+
+  cv.addEventListener('pointercancel', (e) => {
+    S.pointers.delete(e.pointerId);
+    S.pinch = null;
+  });
+
+  function closeLoop() {
+    if (S.segments.length < 2) { setStatus('线段太少'); return; }
+    const key = p => `${Math.round(p.x / 6)},${Math.round(p.y / 6)}`;
+    const deg = new Map();
+    S.segments.forEach(sg => {
+      [sg.a, sg.b].forEach(p => {
+        const k = key(p);
+        deg.set(k, (deg.get(k) || 0) + 1);
+      });
     });
-    return best;
-  }
-
-  function hitNote(pt) {
-    let best = null;
-    S.notes.forEach((nt, i) => {
-      const q = i2s(nt.pos);
-      const d = Math.hypot(pt.x - q.x, pt.y - q.y);
-      if (d <= 22 && (!best || d < best.d)) best = { idx: i, d };
+    const ends = [];
+    S.segments.forEach(sg => {
+      [sg.a, sg.b].forEach(p => { if (deg.get(key(p)) === 1) ends.push(p); });
     });
-    return best ? best.idx : null;
-  }
-
-  function splitSegment(i, t) {
-    const sg = S.segments[i];
-    if (t < 0.08 || t > 0.92) { setStatus('分割点太靠端点'); return; }
+    if (ends.length < 2) { setStatus('没有可闭合的开口端点'); return; }
+    // 只连接距离最近的一对端点（小缺口优先）
+    let best = null;
+    for (let i = 0; i < ends.length; i++) {
+      for (let j = i + 1; j < ends.length; j++) {
+        const d = Math.hypot(ends[i].x - ends[j].x, ends[i].y - ends[j].y);
+        if (!best || d < best.d) best = { i, j, d };
+      }
+    }
     pushUndo();
-    const p = { x: sg.a.x + (sg.b.x - sg.a.x) * t, y: sg.a.y + (sg.b.y - sg.a.y) * t };
-    const s1 = { a: { ...sg.a }, b: { ...p }, len: null, adj: sg.adj };
-    const s2 = { a: { ...p }, b: { ...sg.b }, len: null, adj: sg.adj };
-    S.segments.splice(i, 1, s1, s2);
-    S.selected = { kind: 'seg', idx: i };
-    S.anchor = null;
-    render(); refreshList(); setStatus('已分割');
+    S.segments.push({
+      a: { ...ends[best.i] }, b: { ...ends[best.j] }, len: null, adj: '',
+    });
+    S.selected = { kind: 'seg', idx: S.segments.length - 1 };
+    render(); refreshList();
+    setStatus(`已闭合最近的缺口（${best.d.toFixed(0)} 像素），可再点一次继续闭合`);
   }
 
   // ---------- 蓝牙 ----------
@@ -710,17 +1216,45 @@
       S.bleDevice = device;
       const server = await device.gatt.connect();
       const svc = await server.getPrimaryService(BLE_SERVICE);
-      const ch = await svc.getCharacteristic(BLE_MEASURE);
-      S.bleChar = ch;
-      await ch.startNotifications();
-      ch.addEventListener('characteristicvaluechanged', (ev) => {
+      const chars = await svc.getCharacteristics();
+      let subs = 0;
+      const onPacket = (ev) => {
         const dv = ev.target.value;
         try {
-          const dist = dv.getFloat32(0, true);
-          onMeasure(dist);
-        } catch (err) { /* ignore */ }
-      });
+          const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+          const hex = Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
+          const dist = dv.byteLength >= 4 ? dv.getFloat32(0, true) : NaN;
+          const cuuid = (ev.target.uuid || '').slice(4, 8);
+          window.__lastBlePacket = { hex, dist, bytes: dv.byteLength, uuid: cuuid };
+          if (isFinite(dist) && dist > 0.001 && dist < 10000) {
+            onMeasure(dist);
+            setStatus(`收到 ${dist.toFixed(4)} m`);
+          } else {
+            window.__lastZero = { cuuid, hex, bytes: dv.byteLength };
+          }
+        } catch (err) {
+          setStatus('蓝牙数据解析失败: ' + err.message);
+        }
+      };
+      for (const ch of chars) {
+        try {
+          if (!ch.properties || !(ch.properties.notify || ch.properties.indicate)) continue;
+          ch.addEventListener('characteristicvaluechanged', onPacket);
+          await ch.startNotifications();
+          subs++;
+        } catch (e) { /* 某个通道不支持就跳过 */ }
+      }
+      window.__bleChars = chars.map(c => ({ uuid: c.uuid.slice(4, 8), props: c.properties }));
+      setStatus(`已订阅 ${subs} 个通知通道`);
+      if (!subs) {
+        // 兜底：至少订阅测量通道
+        const ch = await svc.getCharacteristic(BLE_MEASURE);
+        ch.addEventListener('characteristicvaluechanged', onPacket);
+        await ch.startNotifications();
+        subs = 1;
+      }
       setBle('徕卡已连接', true);
+      window.__bleInfo = chars.map(c => c.uuid.slice(4, 8) + (c.properties && c.properties.notify ? 'N' : '') + (c.properties && c.properties.read ? 'R' : '') + (c.properties && c.properties.write ? 'W' : '')).join(',');
       setStatus('蓝牙已连接：选中线段/注记后按测距仪');
     } catch (e) {
       setBle('蓝牙未连接');
@@ -870,12 +1404,23 @@
     autoTrace(true);
   };
   $('btnInterior').onclick = interiorRecognize;
-  $('btnInteriorUndo').onclick = () => { S.interior = null; render(); setStatus('已撤回内部识别'); };
+  $('btnInteriorUndo').onclick = () => {
+    if (S.interiorStart == null && !S.interior) { setStatus('当前没有内部识别结果'); return; }
+    if (S.interiorStart != null) {
+      S.segments.splice(S.interiorStart);
+      S.interiorStart = null;
+    }
+    S.interior = null;
+    S.selected = null;
+    render(); refreshList();
+    setStatus('已撤回内部识别，只保留外框');
+  };
   $('btnOutline').onclick = interiorToSegments;
   $('btnClose').onclick = closeLoop;
   $('btnUndo').onclick = undo;
   $('btnBle').onclick = connectBle;
   $('btnBleOff').onclick = () => {
+    if (window.__blePoll) { clearInterval(window.__blePoll); window.__blePoll = null; }
     try { if (S.bleDevice) S.bleDevice.gatt.disconnect(); } catch (e) {}
     S.bleChar = null; S.bleDevice = null;
     setBle('蓝牙未连接'); setStatus('蓝牙已断开');
@@ -982,6 +1527,37 @@
     p.classList.toggle('collapsed');
     $('btnPanel').textContent = p.classList.contains('collapsed') ? '展开' : '收起';
   };
+
+  window.__waice = {
+    get state() { return S; },
+    autoTrace,
+    loadTestImage(src) {
+      return new Promise((resolve, reject) => {
+        const im = new Image();
+        im.onload = () => {
+          const off = document.createElement('canvas');
+          off.width = im.width; off.height = im.height;
+          off.getContext('2d').drawImage(im, 0, 0);
+          S.img = off;
+          fitView();
+          autoTrace(false);
+          resolve({ segments: S.segments.length, crop: S.crop });
+        };
+        im.onerror = reject;
+        im.src = src;
+      });
+    },
+  };
+
+  if (location.search.includes('autotest')) {
+    setTimeout(() => {
+      window.__waice.loadTestImage('test.png').then(r => {
+        const st = window.__traceStats || {};
+        setStatus('STATS ' + JSON.stringify(st));
+        document.title = 'AUTOTEST_OK ' + JSON.stringify(st);
+      }).catch(e => { document.title = 'AUTOTEST_FAIL ' + e.message; });
+    }, 300);
+  }
 
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
