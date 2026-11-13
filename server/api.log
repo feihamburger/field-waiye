@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "D:\zuodianship\waiyezhineng\11-Æ½°åÍøÒ³°æ\server\api.py", line 8, in <module>
+    import cv2
+ModuleNotFoundError: No module named 'cv2'
