@@ -6,58 +6,99 @@
 <title>外业测量 · 平板版</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#123a63">
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=142">
 </head>
 <body>
 <header id="top">
-  <button id="btnOpen" class="primary">打开图纸</button>
+  <button id="btnOpen" class="primary">打开</button>
   <button id="btnFit">适应</button>
-  <button id="btnZoomIn">放大+</button>
-  <button id="btnZoomOut">缩小-</button>
+  <button id="btnZoomIn">放大</button>
+  <button id="btnZoomOut">缩小</button>
   <button id="btnRot">旋转</button>
+  <select id="appModeSel">
+    <option value="plan">附图识别</option>
+    <option value="sketch">手绘</option>
+    <option value="jg">竣工图识别</option>
+    <option value="unordered">无序识别</option>
+  </select>
+  <span id="appVer" class="ver">v138</span>
   <span id="status" class="status">未加载图纸</span>
   <span id="bleState" class="ble">蓝牙未连接</span>
-  <button id="btnBle">连接徕卡</button>
-  <button id="btnBleOff">断开</button>
-  <button id="btnBleLog">蓝牙包</button>
+  <button id="btnBleToggle">连接</button>
+  <button id="btnMore">更多</button>
 </header>
 <input type="file" id="fileInput" accept="*/*" hidden>
 <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
 
-<div id="toolbar">
+<div id="unorderedPanel" style="display:none">
+  <div class="uo-head">无序识别：蓝牙测量会自动收集长度（顺序随意）</div>
+  <div class="uo-row">
+    <textarea id="uoInput" placeholder="也可手动输入，每行/逗号/空格分隔"></textarea>
+    <button id="uoAdd">添加</button>
+  </div>
+  <div id="uoLengths" class="uo-lengths"></div>
+  <div class="uo-row">
+    <label style="font-size:14px"><input type="checkbox" id="uoMinimal" checked> 最少边</label>
+    <button id="uoMatch">识别</button>
+    <button id="uoToSketch">转手绘</button>
+    <button id="uoClear">清空</button>
+    <span id="uoStatus" class="uo-status"></span>
+  </div>
+  <div class="uo-row">
+    <select id="uoType"></select>
+    <select id="uoVariant"></select>
+  </div>
+  <canvas id="uoPreview" width="360" height="260"></canvas>
+</div>
+<div id="editBar">
   <button data-mode="draw">手绘</button>
+  <button data-mode="free">斜线</button>
   <button data-mode="select" class="active">点选</button>
   <button data-mode="addline">加线</button>
   <button data-mode="split">分割</button>
   <button data-mode="note">点注</button>
-  <button data-mode="crop">框选范围</button>
-  <button id="btnCropClear">清除框选</button>
-  <button id="btnCropTrace">框选识别</button>
-  <button id="btnTrace">自动描线</button>
-  <button id="btnInterior">内部识别</button>
-  <button id="btnInteriorUndo">撤回内部</button>
-  <button id="btnOutline">画轮廓</button>
   <button id="btnClose">闭合</button>
-  <button id="btnInputLen">输入长度</button>
-  <button id="btnDelete">删除选中</button>
+  <button id="btnInputLen">输入</button>
+  <button id="btnDelete">删除</button>
   <button id="btnUndo">撤回</button>
   <button id="btnClearAll">清空</button>
-  <button id="btnPhoto">拍照</button>
-  <button id="btnPickPhoto">选图片</button>
-  <button id="btnViewPhoto">查看照片</button>
-  <label class="thick">墙厚mm <input id="thick" type="number" inputmode="numeric" value="200"></label>
+  <label class="thick">墙厚 <input id="thick" type="number" inputmode="numeric" value="20"></label>
   <select id="adj">
     <option value="">无属性</option>
     <option value="++">++</option>
     <option value="+-">+-</option>
     <option value="--">--</option>
   </select>
-  <button id="btnAutoAcc">自动累加:关</button>
-  <button id="btnAccMinus">下一笔减</button>
-  <button id="btnAccZero">累加归零</button>
-  <button id="btnApplyAdj">应用修正</button>
-  <button id="btnCsv">导出CSV</button>
-  <button id="btnPdf">导出PDF手稿</button>
+  <button id="btnAutoAcc">累加:关</button>
+  <button id="btnAccMinus">减一笔</button>
+  <button id="btnAccZero">归零</button>
+  <button id="btnApplyAdj">修正</button>
+</div>
+<div id="fcBar">
+  <button data-mode="crop" id="btnCropMode">框选</button>
+  <button id="btnCropClear">清框</button>
+  <button id="btnCropTrace">识别</button>
+  <button id="btnInterior">内部</button>
+  <button id="btnInteriorUndo">撤内部</button>
+</div>
+<div id="sketchBar" style="display:none">
+  <button id="btnUndoPoint">撤点</button>
+  <button id="btnFinishDraw">完成</button>
+  <button id="btnAdjust">平差</button>
+</div>
+<div id="jgBar" style="display:none">
+  <button id="btnJgCrop">框选</button>
+  <button id="btnJgTrace">识别</button>
+  <button id="btnJgAdaptive">灰黄黑</button>
+</div>
+<div id="moreRow">
+  <button id="btnSign">签名</button>
+  <button id="btnCsv">CSV</button>
+  <button id="btnPdf">PDF手稿</button>
+  <button id="btnPhoto">拍照</button>
+  <button id="btnPickPhoto">选图片</button>
+  <button id="btnViewPhoto">看照片</button>
+  <button id="btnBleLog">蓝牙包</button>
 </div>
 
 <main id="stage">
@@ -65,6 +106,32 @@
   <div id="hint" class="hint">点「打开图纸」→ 选择 PDF 或图片；单指拖动平移，双指缩放。</div>
 </main>
 
+<div id="infoBar">
+  <span id="infoTitle">未选中</span>
+  <span id="infoLen"></span>
+  <span id="infoAdj"></span>
+  <span id="infoTotal"></span>
+  <button id="btnInfoPhoto">拍照</button>
+  <button id="btnInfoPick">选图</button>
+  <a id="infoPhotoLink" href="#" target="_blank" rel="noopener">查看照片</a>
+</div>
+<div id="signModal">
+  <div class="pm-box">
+    <div class="sm-tip">请用手指在下方区域签名</div>
+    <canvas id="signCanvas" width="1000" height="360"></canvas>
+    <div class="sm-btns">
+      <button id="signClear">清空</button>
+      <button id="signSave">保存签名</button>
+      <button id="signClose">关闭</button>
+    </div>
+  </div>
+</div>
+<div id="photoModal">
+  <div class="pm-box">
+    <img id="photoModalImg" alt="照片">
+    <button id="photoModalClose">关闭</button>
+  </div>
+</div>
 <pre id="bleLog" style="display:none;margin:0;padding:6px 10px;max-height:160px;overflow:auto;background:#0b1b2b;color:#9fe;font-size:12px;white-space:pre-wrap;"></pre>
 <section id="panel">
   <div class="panel-head">
@@ -76,6 +143,19 @@
 
 <script src="lib/pdf.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
-<script src="app.js?v=29"></script>
+<script src="js/state.js?v=142"></script>
+<script src="js/unordered-matcher.js?v=142"></script>
+<script src="js/ble-proto.js?v=142"></script>
+<script src="js/ble.js?v=142"></script>
+<script src="js/export.js?v=142"></script>
+<script src="js/recognize.js?v=142"></script>
+<script src="js/ui.js?v=142"></script>
+<script src="js/unordered.js?v=142"></script>
+<script src="js/jg-vector.js?v=142"></script>
+<script src="js/jg.js?v=142"></script>
+<script src="js/interactions.js?v=142"></script>
+<script src="js/sign.js?v=142"></script>
+<script src="js/selfcheck.js?v=142"></script>
+<script src="app.js?v=142"></script>
 </body>
 </html>

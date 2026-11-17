@@ -1,9 +1,9 @@
-const CACHE = 'waice-v7';
+const CACHE = 'waice-v10';
 const FILES = [
   './',
   './index.html',
   './style.css',
-  './app.js',
+  './app.js', './js/state.js', './js/unordered-matcher.js', './js/ble-proto.js', './js/ble.js', './js/export.js', './js/recognize.js', './js/ui.js', './js/unordered.js', './js/interactions.js', './js/jg.js', './js/selfcheck.js', './js/sign.js', './js/jg-vector.js',
   './manifest.webmanifest',
   './lib/pdf.min.js',
   './lib/pdf.worker.min.js',
