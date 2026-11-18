@@ -888,6 +888,16 @@ $('btnAdjust').onclick = () => {
   W.render(); W.refreshList();
   W.setStatus('已平差：按各段长度重新分配点位');
 };
+$('btnRelay').onclick = () => {
+  if (window.RELAY.active) {
+    window.RELAY.disconnect();
+    W.setStatus('已断开手机连接');
+    return;
+  }
+  const code = String(Math.floor(1000 + Math.random() * 9000));
+  window.RELAY.connect(code, 'tablet');
+  W.setStatus('手机配对码：' + code + '（手机端输入此码）');
+};
 $('btnMore').onclick = () => {
   const m = $('moreRow');
   m.classList.toggle('open');
