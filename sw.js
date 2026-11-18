@@ -1,4 +1,4 @@
-const CACHE = 'waice-v16';
+const CACHE = 'waice-v17';
 const FILES = [
   './',
   './index.html',
