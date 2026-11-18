@@ -43,7 +43,7 @@
         const g = window.GEO && window.GEO.current();
         const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len, hex, phoneGeo: g || null });
         addRow(len, ok);
-        setBle(ok ? '已发送 ' + len.toFixed(4) + ' m' : '蓝牙收到，但中转未连接：' + len.toFixed(4) + ' m');
+        setBle(ok ? ('已发送 ' + len.toFixed(4) + ' m' + (g ? '（含GPS）' : '（无GPS）')) : '蓝牙收到，但中转未连接：' + len.toFixed(4) + ' m');
       };
       for (const ch of chars) {
         try {
@@ -90,7 +90,7 @@
     const g = window.GEO && window.GEO.current();
     const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len: v, manual: true, phoneGeo: g || null });
     addRow(v, ok);
-    setBle(ok ? '已发送 ' + v.toFixed(4) + ' m（手动）' : '中转未连接，发送失败');
+    setBle(ok ? ('已发送 ' + v.toFixed(4) + ' m（手动' + (g ? '，含GPS' : '，无GPS') + '）') : '中转未连接，发送失败');
   };
   $('manualLen').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSendManual').click(); });
 
