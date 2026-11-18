@@ -5,6 +5,7 @@
   const $ = (id) => document.getElementById(id);
   const setRelay = (s) => { $('relayStatus').textContent = s; };
   const setBle = (s) => { $('bleStatus').textContent = s; };
+  let geoOn = false;
   let device = null, code = '';
 
   if (window.RELAY) {
@@ -39,7 +40,8 @@
         if (!isFinite(len) || len <= 0.001 || len > 10000) return;
         const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
         const hex = Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
-        const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len, hex });
+        const g = window.GEO && window.GEO.current();
+        const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len, hex, phoneGeo: g || null });
         addRow(len, ok);
         setBle(ok ? '已发送 ' + len.toFixed(4) + ' m' : '蓝牙收到，但中转未连接：' + len.toFixed(4) + ' m');
       };
@@ -85,11 +87,16 @@
   $('btnSendManual').onclick = () => {
     const v = parseFloat($('manualLen').value);
     if (!isFinite(v) || v <= 0) { setBle('请输入有效长度'); return; }
-    const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len: v, manual: true });
+    const g = window.GEO && window.GEO.current();
+    const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len: v, manual: true, phoneGeo: g || null });
     addRow(v, ok);
     setBle(ok ? '已发送 ' + v.toFixed(4) + ' m（手动）' : '中转未连接，发送失败');
   };
   $('manualLen').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSendManual').click(); });
+
+  if (window.GEO) {
+    window.GEO.start((s) => { if (!geoOn && s.indexOf('定位中') === 0) { geoOn = true; setBle(s); } });
+  }
 
   $('btnBle').onclick = connectBle;
   $('btnBleOff').onclick = () => {
