@@ -19,6 +19,7 @@
     code = ($('code').value || '').trim();
     if (!/^\d{3,6}$/.test(code)) { setStatus('请先输入 3~6 位配对码'); return; }
     window.RELAY.connect(code, 'phone');
+    startGeoPublish();
   };
   $('btnRelayOff').onclick = () => { window.RELAY.disconnect(); setRelay('已断开中转'); };
 
@@ -94,9 +95,27 @@
   };
   $('manualLen').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSendManual').click(); });
 
+  let geoPublish = null;
+  function startGeoPublish() {
+    if (geoPublish) return;
+    geoPublish = setInterval(() => {
+      const g = window.GEO && window.GEO.current();
+      if (g && window.RELAY && window.RELAY.active) {
+        window.RELAY.publish({ type: 'geo', t: Date.now(), lat: g.lat, lng: g.lng, acc: g.acc });
+      }
+    }, 5000);
+  }
+
   if (window.GEO) {
     window.GEO.start((s) => { if (!geoOn && s.indexOf('定位中') === 0) { geoOn = true; setBle(s); } });
   }
+
+  $('btnSendGeo').onclick = () => {
+    const g = window.GEO && window.GEO.current();
+    if (!g) { setBle('还没有定位，请到开阔处等待'); return; }
+    const ok = window.RELAY.publish({ type: 'geo', t: Date.now(), lat: g.lat, lng: g.lng, acc: g.acc });
+    setBle(ok ? '已发送我的位置 ±' + Math.round(g.acc) + ' m' : '中转未连接');
+  };
 
   $('btnBle').onclick = connectBle;
   $('btnBleOff').onclick = () => {
