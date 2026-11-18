@@ -77,12 +77,17 @@
   if (window.RELAY) window.RELAY.init({
     onStatus: (s) => setStatus(s),
     onMessage: (m) => {
+      if (m && m.type === 'geo' && isFinite(m.lat)) {
+        window.__peerGeo = { lat: m.lat, lng: m.lng, acc: m.acc, t: m.t };
+        setStatus('已收到对方位置 ±' + Math.round(m.acc || 0) + ' m');
+        return;
+      }
       if (m && m.type === 'meas' && isFinite(m.len)) {
         let dirTxt = '';
         let why = '';
         try {
           if (m.phoneGeo && window.GEO) {
-            const mine = window.GEO.current();
+            const mine = window.GEO.current() || window.__peerGeo;
             if (mine && mine.acc && m.phoneGeo.acc) {
               const Lm = window.GEO.distM(m.phoneGeo, mine);
               const deg = window.GEO.bearing(m.phoneGeo, mine);
@@ -93,7 +98,7 @@
                 if (sg) {
                   sg.dir = deg;
                   sg.dirAcc = sigma;
-                  sg.dirSrc = 'GPS';
+                  sg.dirSrc = window.GEO.current() ? 'GPS(本机)' : 'GPS(双机)';
                   sg.dirLen = Lm;
                 }
               }
@@ -278,7 +283,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v150';
+  if (verEl) verEl.textContent = 'v151';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
