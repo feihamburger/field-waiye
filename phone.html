@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>外业测量 · 手机端（发送）</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    background: #eef1f5; color: #123a63; padding: 14px; }
+  h1 { font-size: 19px; margin: 0 0 10px; }
+  .group { background: #fff; border-radius: 10px; padding: 12px; margin-bottom: 12px;
+    border: 1px solid #d6dde7; }
+  label { font-size: 14px; font-weight: 700; }
+  input { font-size: 20px; width: 100%; padding: 8px; border-radius: 8px;
+    border: 1px solid #b9c8da; margin: 6px 0 10px; text-align: center; letter-spacing: 4px; }
+  button { font-size: 16px; padding: 10px 14px; border-radius: 8px; border: none;
+    background: #123a63; color: #fff; margin: 0 8px 8px 0; }
+  button.primary { background: #f5a623; color: #123a63; font-weight: 700; }
+  #status { font-size: 14px; color: #45586e; margin: 6px 0 10px; min-height: 20px; }
+  #list { font-family: Consolas, monospace; font-size: 15px; }
+  #list .row { display: flex; justify-content: space-between; padding: 6px 4px;
+    border-bottom: 1px solid #eef1f5; }
+  .hint { font-size: 13px; color: #8a96a8; }
+</style>
+</head>
+<body>
+<h1>手机端 · 测量发送</h1>
+
+<div class="group">
+  <label>配对码（平板屏幕上显示的 4 位数字）</label>
+  <input id="code" inputmode="numeric" maxlength="4" placeholder="0000">
+  <div>
+    <button id="btnRelay" class="primary">连接中转</button>
+    <button id="btnRelayOff">断开中转</button>
+  </div>
+  <div id="status">未连接</div>
+</div>
+
+<div class="group">
+  <label>徕卡测距仪</label>
+  <div style="margin-top:8px">
+    <button id="btnBle" class="primary">连接徕卡</button>
+    <button id="btnBleOff">断开徕卡</button>
+  </div>
+  <div class="hint">连接后按测距仪，读数会自动发给平板</div>
+</div>
+
+<div class="group">
+  <div id="list"></div>
+</div>
+
+<script src="lib/mqtt.min.js"></script>
+<script src="js/relay.js"></script>
+<script src="js/phone.js"></script>
+</body>
+</html>
