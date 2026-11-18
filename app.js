@@ -248,7 +248,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v145';
+  if (verEl) verEl.textContent = 'v146';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
@@ -268,6 +268,17 @@
     window.RELAY.connect('4321', 'tablet');
     setTimeout(() => { window.RELAY.publish({ type: 'meas', t: Date.now(), len: 1.2345 }); }, 4000);
   }, 500);
-  document.title = '外业测量 · 平板版 v145';
+  document.title = '外业测量 · 平板版 v146';
+  try {
+    let wake = null;
+    const req = async () => {
+      try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    };
+    req();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { req(); if (window.RELAY && window.RELAY.ensure) window.RELAY.ensure(); }
+    });
+  } catch (e) {}
+
   window.__ready = true;
 })();
