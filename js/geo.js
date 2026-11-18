@@ -4,6 +4,7 @@
   let last = null;
   let watching = false;
   let statusCb = null;
+  let lastErr = null;
 
   function median(arr) {
     const a = arr.slice().sort((x, y) => x - y);
@@ -23,7 +24,11 @@
       last = samples[samples.length - 1];
       if (statusCb) statusCb('定位中 ±' + Math.round(c.accuracy) + ' m');
     }, (err) => {
-      if (statusCb) statusCb('定位失败：' + (err.message || err.code));
+      lastErr = err;
+      const msg = err && err.code === 1 ? '定位权限被拒绝，请在浏览器设置里允许位置'
+        : err && err.code === 2 ? '定位不可用（系统定位关闭？）'
+        : '定位超时，走到开阔处重试';
+      if (statusCb) statusCb('定位失败：' + msg);
     }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 });
   }
 
@@ -58,6 +63,7 @@
 
   window.GEO = {
     start, current, distM, bearing, samples,
+    get lastError() { return lastErr; },
     get active() { return watching; },
   };
 })();
