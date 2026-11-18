@@ -79,6 +79,7 @@
     onMessage: (m) => {
       if (m && m.type === 'meas' && isFinite(m.len)) {
         let dirTxt = '';
+        let why = '';
         try {
           if (m.phoneGeo && window.GEO) {
             const mine = window.GEO.current();
@@ -97,12 +98,16 @@
                 }
               }
               dirTxt = '，方向 ' + deg.toFixed(1) + '° ±' + sigma.toFixed(0) + '°';
+            } else {
+              why = m.phoneGeo ? '（平板无定位）' : '（手机无GPS）';
             }
+          } else {
+            why = '（无GPS数据）';
           }
         } catch (e) {}
         onMeasure(m.len);
         render(); refreshList();
-        setStatus('手机收到 ' + m.len.toFixed(4) + ' m' + dirTxt);
+        setStatus('手机收到 ' + m.len.toFixed(4) + ' m' + dirTxt + (why || ''));
       }
     },
   });
@@ -273,7 +278,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v146';
+  if (verEl) verEl.textContent = 'v148';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
