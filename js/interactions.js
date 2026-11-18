@@ -896,6 +896,18 @@ $('btnAdjust').onclick = () => {
   W.render(); W.refreshList();
   W.setStatus('已平差：按各段长度重新分配点位');
 };
+$('btnGeo').onclick = () => {
+  if (!window.GEO) { W.setStatus('没有定位模块'); return; }
+  const cur = window.GEO.current();
+  if (cur) W.setStatus('定位中：±' + Math.round(cur.acc) + ' m（样本 ' + (cur.n || 1) + '）');
+  window.GEO.start((s) => W.setStatus(s));
+  if (navigator.permissions && navigator.permissions.query) {
+    navigator.permissions.query({ name: 'geolocation' }).then((p) => {
+      if (p.state === 'denied') W.setStatus('定位被禁用：请到浏览器设置允许本站位置');
+      else if (p.state === 'granted') W.setStatus('定位已允许，等待卫星…');
+    }).catch(() => {});
+  }
+};
 $('btnRelay').onclick = () => {
   if (window.RELAY.active) {
     window.RELAY.disconnect();
