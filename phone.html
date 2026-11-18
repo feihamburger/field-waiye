@@ -17,7 +17,7 @@
   button { font-size: 16px; padding: 10px 14px; border-radius: 8px; border: none;
     background: #123a63; color: #fff; margin: 0 8px 8px 0; }
   button.primary { background: #f5a623; color: #123a63; font-weight: 700; }
-  #status { font-size: 14px; color: #45586e; margin: 6px 0 10px; min-height: 20px; }
+  .stat { font-size: 14px; color: #45586e; margin: 6px 0 10px; min-height: 20px; }
   #list { font-family: Consolas, monospace; font-size: 15px; }
   #list .row { display: flex; justify-content: space-between; padding: 6px 4px;
     border-bottom: 1px solid #eef1f5; }
@@ -34,7 +34,7 @@
     <button id="btnRelay" class="primary">连接中转</button>
     <button id="btnRelayOff">断开中转</button>
   </div>
-  <div id="status">未连接</div>
+  <div id="relayStatus" class="stat">未连接</div>
 </div>
 
 <div class="group">
@@ -43,6 +43,7 @@
     <button id="btnBle" class="primary">连接徕卡</button>
     <button id="btnBleOff">断开徕卡</button>
   </div>
+  <div id="bleStatus" class="stat">未连接</div>
   <div class="hint">连接后按测距仪，读数会自动发给平板</div>
 </div>
 
