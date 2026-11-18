@@ -278,7 +278,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v148';
+  if (verEl) verEl.textContent = 'v149';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
@@ -298,7 +298,7 @@
     window.RELAY.connect('4321', 'tablet');
     setTimeout(() => { window.RELAY.publish({ type: 'meas', t: Date.now(), len: 1.2345 }); }, 4000);
   }, 500);
-  document.title = '外业测量 · 平板版 v146';
+  document.title = '外业测量 · 平板版 v149';
   try {
     let wake = null;
     const req = async () => {
