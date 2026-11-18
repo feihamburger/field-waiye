@@ -82,6 +82,15 @@
     setTimeout(() => { window.RELAY.publish({ type: 'meas', t: Date.now(), len: 1.2345 }); }, 3000);
   }, 300);
 
+  $('btnSendManual').onclick = () => {
+    const v = parseFloat($('manualLen').value);
+    if (!isFinite(v) || v <= 0) { setBle('请输入有效长度'); return; }
+    const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len: v, manual: true });
+    addRow(v, ok);
+    setBle(ok ? '已发送 ' + v.toFixed(4) + ' m（手动）' : '中转未连接，发送失败');
+  };
+  $('manualLen').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btnSendManual').click(); });
+
   $('btnBle').onclick = connectBle;
   $('btnBleOff').onclick = () => {
     try { if (device) device.gatt.disconnect(); } catch (e) {}
