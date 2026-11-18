@@ -3,12 +3,13 @@
   const SERVICE = '3ab10100-f831-4395-b29d-570977d5bf94';
   const MEASURE = '3ab1010d-f831-4395-b29d-570977d5bf94';
   const $ = (id) => document.getElementById(id);
-  const setStatus = (s) => { $('status').textContent = s; };
+  const setRelay = (s) => { $('relayStatus').textContent = s; };
+  const setBle = (s) => { $('bleStatus').textContent = s; };
   let device = null, code = '';
 
   if (window.RELAY) {
     window.RELAY.init({
-      onStatus: (s) => setStatus(s),
+      onStatus: (s) => setRelay(s),
       onMessage: () => {},
     });
   }
@@ -18,12 +19,12 @@
     if (!/^\d{3,6}$/.test(code)) { setStatus('请先输入 3~6 位配对码'); return; }
     window.RELAY.connect(code, 'phone');
   };
-  $('btnRelayOff').onclick = () => { window.RELAY.disconnect(); setStatus('已断开中转'); };
+  $('btnRelayOff').onclick = () => { window.RELAY.disconnect(); setRelay('已断开中转'); };
 
   async function connectBle() {
-    if (!navigator.bluetooth) { alert('此浏览器不支持蓝牙，请用 Chrome/Edge 并通过 https 或 localhost 打开'); return; }
+    if (!navigator.bluetooth) { setBle('此浏览器不支持蓝牙，请改用 Microsoft Edge 打开'); alert('此浏览器不支持蓝牙，请用 Microsoft Edge 打开本页'); return; }
     try {
-      setStatus('搜索徕卡…');
+      setBle('搜索徕卡…（选择框里要选 DISTO）');
       device = await navigator.bluetooth.requestDevice({
         filters: [{ services: [SERVICE] }], optionalServices: [SERVICE],
       });
@@ -40,7 +41,7 @@
         const hex = Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
         const ok = window.RELAY.publish({ type: 'meas', t: Date.now(), len, hex });
         addRow(len, ok);
-        setStatus(ok ? '已发送 ' + len.toFixed(4) + ' m' : '蓝牙收到，但中转未连接：' + len.toFixed(4) + ' m');
+        setBle(ok ? '已发送 ' + len.toFixed(4) + ' m' : '蓝牙收到，但中转未连接：' + len.toFixed(4) + ' m');
       };
       for (const ch of chars) {
         try {
@@ -55,9 +56,14 @@
         ch.addEventListener('characteristicvaluechanged', onPacket);
         await ch.startNotifications();
       }
-      setStatus('徕卡已连接，按测量键发送');
+      setBle('徕卡已连接，按测量键发送');
     } catch (e) {
-      setStatus('连接失败：' + (e.message || e));
+      const msg = String(e && e.message || e);
+      if (msg.indexOf('cancel') >= 0 || (e && e.name === 'NotFoundError')) {
+        setBle('未选择设备：请确认测距仪已开机、未被其他设备连接，靠近手机后重试');
+      } else {
+        setBle('连接失败：' + msg);
+      }
     }
   }
 
@@ -80,6 +86,6 @@
   $('btnBleOff').onclick = () => {
     try { if (device) device.gatt.disconnect(); } catch (e) {}
     device = null;
-    setStatus('徕卡已断开');
+    setBle('徕卡已断开');
   };
 })();
