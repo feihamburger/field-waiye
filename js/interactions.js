@@ -792,6 +792,8 @@ function renderInfoBar() {
     document.getElementById('infoAdj').textContent = '';
     const tot0 = document.getElementById('infoTotal');
     if (tot0) tot0.textContent = '';
+    const d0 = document.getElementById('infoDir');
+    if (d0) d0.textContent = '';
     const link0 = document.getElementById('infoPhotoLink');
     link0.style.display = 'none';
     return;
@@ -806,6 +808,12 @@ function renderInfoBar() {
   document.getElementById('infoTitle').textContent = title;
   document.getElementById('infoLen').textContent = lenTxt;
   document.getElementById('infoAdj').textContent = adjTxt;
+  const dirEl = document.getElementById('infoDir');
+  if (dirEl) {
+    dirEl.textContent = (it.dir != null)
+      ? ('方向：' + it.dir.toFixed(1) + '°' + (it.dirAcc != null ? ' ±' + it.dirAcc.toFixed(0) + '°' : '') + (it.dirSrc ? '（' + it.dirSrc + '）' : ''))
+      : '';
+  }
   const totEl = document.getElementById('infoTotal');
   if (totEl) {
     const sumT = (S().totals || []).reduce((acc, x) => acc + (x.len || 0), 0);
