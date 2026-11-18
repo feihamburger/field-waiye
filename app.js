@@ -72,6 +72,16 @@
     getState: () => S, setStatus, pushUndo, render, refreshList, i2s, s2i, itemOf,
   });
 
+  if (window.RELAY) window.RELAY.init({
+    onStatus: (s) => setStatus(s),
+    onMessage: (m) => {
+      if (m && m.type === 'meas' && isFinite(m.len)) {
+        onMeasure(m.len);
+        setStatus('手机收到 ' + m.len.toFixed(4) + ' m');
+      }
+    },
+  });
+
   window.BLE.init({ setStatus, setBle, onMeasure, state: S });
 
   // ---------- 导出 ----------
@@ -238,7 +248,26 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v142';
-  document.title = '外业测量 · 平板版 v142';
+  if (verEl) verEl.textContent = 'v145';
+  if (location.search.includes('relaytest')) setTimeout(() => {
+    window.RELAY.init({
+      onStatus: (s) => setStatus('RELAY ' + s),
+      onMessage: (m) => {
+        if (m && m.type === 'meas') setStatus('RELAYTEST got ' + m.len);
+      },
+    });
+    window.RELAY.connect('4321', 'tablet');
+  }, 500);
+  if (location.search.includes('relayselftest')) setTimeout(() => {
+    window.RELAY.init({
+      onStatus: (s) => setStatus('SELFTEST ' + s),
+      onMessage: (m) => {
+        if (m && m.type === 'meas') setStatus('SELFTEST got ' + m.len);
+      },
+    });
+    window.RELAY.connect('4321', 'tablet');
+    setTimeout(() => { window.RELAY.publish({ type: 'meas', t: Date.now(), len: 1.2345 }); }, 4000);
+  }, 500);
+  document.title = '外业测量 · 平板版 v145';
   window.__ready = true;
 })();
