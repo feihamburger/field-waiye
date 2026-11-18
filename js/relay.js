@@ -7,6 +7,7 @@
   let client = null;
   let opts = null;
   let topic = null;
+  let last = null;   // {code, role}
 
   function init(o) {
     opts = o || {};               // { onMessage(obj), onStatus(str) }
@@ -19,6 +20,7 @@
   function connect(code, role) {
     disconnect();
     topic = 'waice/' + code + '/meas';
+    last = { code, role };
     status('正在连接中转服务…');
     try {
       client = window.mqtt.connect(BROKER, {
@@ -63,8 +65,20 @@
     client = null;
   }
 
+  function ensure() {
+    if (!last) return;
+    if (!client) { connect(last.code, last.role); return; }
+    try { if (!client.connected) client.reconnect(); } catch (e) {}
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) ensure();
+    });
+  }
+
   window.RELAY = {
-    init, connect, publish, disconnect, status,
+    init, connect, publish, disconnect, status, ensure,
     get active() { return !!client; },
     BROKER,
   };
