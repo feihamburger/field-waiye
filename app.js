@@ -278,7 +278,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v149';
+  if (verEl) verEl.textContent = 'v150';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
