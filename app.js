@@ -72,12 +72,37 @@
     getState: () => S, setStatus, pushUndo, render, refreshList, i2s, s2i, itemOf,
   });
 
+  if (window.GEO) window.GEO.start((s) => { if (s.indexOf('定位中') === 0) setStatus(s); });
+
   if (window.RELAY) window.RELAY.init({
     onStatus: (s) => setStatus(s),
     onMessage: (m) => {
       if (m && m.type === 'meas' && isFinite(m.len)) {
+        let dirTxt = '';
+        try {
+          if (m.phoneGeo && window.GEO) {
+            const mine = window.GEO.current();
+            if (mine && mine.acc && m.phoneGeo.acc) {
+              const Lm = window.GEO.distM(m.phoneGeo, mine);
+              const deg = window.GEO.bearing(m.phoneGeo, mine);
+              const sigma = Math.atan2(Math.SQRT2 * Math.hypot(m.phoneGeo.acc, mine.acc), Math.max(1, Lm)) * 180 / Math.PI;
+              const sel = S.selected;
+              if (sel && sel.kind === 'seg') {
+                const sg = S.segments[sel.idx];
+                if (sg) {
+                  sg.dir = deg;
+                  sg.dirAcc = sigma;
+                  sg.dirSrc = 'GPS';
+                  sg.dirLen = Lm;
+                }
+              }
+              dirTxt = '，方向 ' + deg.toFixed(1) + '° ±' + sigma.toFixed(0) + '°';
+            }
+          }
+        } catch (e) {}
         onMeasure(m.len);
-        setStatus('手机收到 ' + m.len.toFixed(4) + ' m');
+        render(); refreshList();
+        setStatus('手机收到 ' + m.len.toFixed(4) + ' m' + dirTxt);
       }
     },
   });
