@@ -128,3 +128,58 @@ button:active { transform: scale(0.97); }
 #signModal #signSave { background: #f5a623; color: #123a63; font-weight: 700; }
 
 .ver { font-size: 12px; opacity: .7; background: #ffffff22; padding: 3px 6px; border-radius: 6px; }
+
+#compassModal { display: none; position: fixed; inset: 0; z-index: 1001;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#compassModal.open { display: flex; }
+#compassModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; min-width: 300px; }
+#compassModal .sm-btns { display: flex; gap: 8px; margin-top: 6px; }
+#compassModal button { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: none;
+  background: #123a63; color: #fff; }
+#compassModal #compassSave { background: #f5a623; color: #123a63; font-weight: 700; }
+
+#sizhiModal { display: none; position: fixed; inset: 0; z-index: 1002;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#sizhiModal.open { display: flex; }
+#sizhiModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 8px; min-width: 300px; }
+#sizhiModal label { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; color: #123a63; }
+#sizhiModal input { width: 160px; font-size: 15px; padding: 6px 8px; border: 1px solid #b9c8da; border-radius: 6px; }
+#sizhiModal .sm-btns { display: flex; gap: 8px; margin-top: 6px; }
+#sizhiModal button { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: none;
+  background: #123a63; color: #fff; }
+#sizhiModal #szSave { background: #f5a623; color: #123a63; font-weight: 700; }
+
+#sizhiModal .adjBtn { font-size: 13px; padding: 4px 8px; border-radius: 6px; background: #607d8b; color: #fff; }
+#sizhiModal .adjBtn.on { background: #f5a623; color: #123a63; font-weight: 700; }
+#sizhiModal label { align-items: center; }
+#sizhiModal input { width: 110px; }
+
+#sizhiModal .doorInput { width: 70px; }
+#sizhiModal label { flex-wrap: nowrap; }
+
+#sizhiModal .cardHint { color: #8d6e63; font-size: 13px; min-width: 34px; text-align: center; }
+#sizhiModal input { width: 80px; }
+
+#zhInitModal { display: none; position: fixed; inset: 0; z-index: 1003;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#zhInitModal.open { display: flex; }
+#zhInitModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 280px; }
+#zhInitModal label { display: flex; justify-content: space-between; gap: 10px; font-size: 15px; color: #123a63; }
+#zhInitModal input { width: 140px; font-size: 16px; padding: 6px 8px; border: 1px solid #b9c8da; border-radius: 6px; }
+#zhInitModal .sm-btns { display: flex; gap: 8px; }
+#zhInitModal button { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: none;
+  background: #123a63; color: #fff; }
+#zhInitModal #zhInitOk { background: #f5a623; color: #123a63; font-weight: 700; }
+
+#thickBar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 6px 10px; background: #123a63; color: #fff; flex: 0 0 auto; }
+#thickBar .thick { display: flex; align-items: center; gap: 6px; font-size: 16px; }
+#thickBar input { width: 64px; font-size: 16px; padding: 6px; border-radius: 6px; border: none; text-align: center; }
+#thickBar select, #thickBar button { font-size: 16px; padding: 7px 10px; border-radius: 8px; border: none;
+  background: #1d4d7a; color: #fff; }
+
+#infoBar .infoThick { display: flex; align-items: center; gap: 6px; font-size: 14px; }
+#infoBar .infoThick input { width: 64px; font-size: 14px; padding: 4px 6px; border-radius: 6px; border: 1px solid #d6c9a8; text-align: center; }
