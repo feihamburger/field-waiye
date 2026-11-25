@@ -24,9 +24,14 @@ function effLen(it) {
 
 function nPlus(adj) { return (adj || '').split('+').length - 1; }
 
+function thicknessMOf(it) {
+  if (it && it.thickCm != null && !isNaN(it.thickCm)) return Math.max(0, it.thickCm / 100);
+  return thicknessM();
+}
+
 function corrected(it) {
   if (it.len == null) return null;
-  return it.len + nPlus(it.adj) * thicknessM();
+  return it.len + nPlus(it.adj) * thicknessMOf(it);
 }
 
 function totalOk(tt) {
