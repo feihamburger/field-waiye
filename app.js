@@ -68,6 +68,8 @@
 
   window.UI.init({ getState: () => S, $ });
 
+  if (window.UOR && window.UOR.updateModeBars) window.UOR.updateModeBars();
+
   window.REC.init({
     getState: () => S, setStatus, pushUndo, render, refreshList, i2s, s2i, itemOf,
   });
@@ -283,7 +285,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v151';
+  if (verEl) verEl.textContent = 'v190';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
@@ -314,6 +316,168 @@
       if (!document.hidden) { req(); if (window.RELAY && window.RELAY.ensure) window.RELAY.ensure(); }
     });
   } catch (e) {}
+
+  if (location.search.includes('zhtest')) setTimeout(() => {
+    const sel = document.getElementById('appModeSel');
+    sel.value = 'zh';
+    sel.dispatchEvent(new Event('change'));
+    setTimeout(() => {
+      try {
+        document.getElementById('zhHouseNo').value = '18';
+        document.getElementById('zhFloors').value = '3';
+        document.getElementById('zhInitOk').click();
+      } catch (e) {}
+      document.getElementById('btnZhCut').click();
+      setStatus('ZHTEST app=' + S.app + ' floors=' + S.floorCount + ' opts=' + document.getElementById('zhFloorSel').options.length + ' segs=' + S.segments.length + ' panel=' + getComputedStyle(document.getElementById('panel')).display +
+        ' sketchBar=' + getComputedStyle(document.getElementById('sketchBar')).display +
+        ' editBar=' + getComputedStyle(document.getElementById('editBar')).display);
+    }, 400);
+  }, 600);
+
+  if (location.search.includes('dragtest')) setTimeout(() => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = 1240; c.height = 1754;
+      c.getContext('2d').fillStyle = '#fff';
+      c.getContext('2d').fillRect(0, 0, c.width, c.height);
+      S.img = c;
+      S.app = 'sketch';
+      S.mode = 'select';
+      S.segments = [{ a: { x: 300, y: 600 }, b: { x: 800, y: 600 }, len: 5, adj: '' }];
+      S.selected = null;
+      render();
+      const before = JSON.stringify(S.segments[0].b);
+      const ip = { x: S.segments[0].b.x, y: S.segments[0].b.y };
+      const began = window.DRAW.beginVertexDrag(ip, 'select');
+      window.DRAW.moveVertexDrag({ x: S.segments[0].b.x + 40, y: S.segments[0].b.y + 25 });
+      const moved = window.DRAW.endVertexDrag();
+      setStatus('DRAGTEST began=' + began + ' moved=' + moved + ' before=' + before + ' after=' + JSON.stringify(S.segments[0].b));
+    } catch (e) {
+      setStatus('DRAGTEST ERR ' + e.message);
+    }
+  }, 800);
+
+  if (location.search.includes('multitest')) setTimeout(() => {
+    S.img = document.createElement('canvas'); S.img.width = 1240; S.img.height = 1754;
+    S.app = 'sketch';
+    S.segments = [
+      { a: { x: 100, y: 100 }, b: { x: 300, y: 100 }, len: null, adj: '' },
+      { a: { x: 300, y: 100 }, b: { x: 300, y: 300 }, len: null, adj: '' },
+      { a: { x: 100, y: 300 }, b: { x: 300, y: 300 }, len: null, adj: '' },
+    ];
+    S.multi = [0, 1];
+    document.getElementById('btnMirror').click();
+    const afterMirror = S.segments[0].a.x;
+    document.getElementById('btnCopy').click();
+    const n = S.segments.length;
+    const bars = ['editBar','fcBar','jgBar'].map(id => id + '=' + getComputedStyle(document.getElementById(id)).display).join(' ');
+    setStatus('MULTITEST mirrorX=' + afterMirror + ' segs=' + n + ' | ' + bars);
+  }, 900);
+
+  if (location.search.includes('doortest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    c.getContext('2d').fillStyle = '#fff'; c.getContext('2d').fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'sketch'; S.mode = 'select';
+    S.segments = [{ a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' }];
+    S.doors = [{ pos: { x: 600, y: 500 }, num: '18' }];
+    render(); refreshList();
+    setStatus('DOORTEST doors=' + S.doors.length);
+  }, 700);
+
+  if (location.search.includes('sizhitest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c;
+    S.app = 'zh';
+    S.mode = 'select';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    S.north = 96;
+    S.sizhi = {
+      east: '巷', south: '巷', west: '巷', north: '巷',
+      adj: { east: { on: false, door: '' }, south: { on: false, door: '' }, west: { on: false, door: '' }, north: { on: true, door: '7' } },
+    };
+    window.WS.fitView();
+    render(); refreshList();
+    setStatus('SIZHITEST ok');
+  }, 800);
+
+  if (location.search.includes('floortest')) setTimeout(() => {
+    const sel = document.getElementById('appModeSel');
+    sel.value = 'zh'; sel.dispatchEvent(new Event('change'));
+    setTimeout(() => {
+      window.UOR.zhSetFloors(3);
+      window.UOR.zhSwitchFloor(2);
+      setStatus('FLOORTEST count=' + S.floorCount + ' idx=' + S.floorIdx + ' segs=' + S.segments.length + ' adj=' + S.segments.filter(x=>x.adj==='++').length);
+    }, 300);
+  }, 700);
+
+  if (location.search.includes('balctest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'zh'; S.mode = 'select';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    S.balconies = []; S.doors = []; S.sizhi = null;
+    window.WS.fitView();
+    S.mode = 'balcony';
+    window.INT.handleTap(window.WS.i2s({ x: 620, y: 560 }));
+    window.INT.handleTap(window.WS.i2s({ x: 760, y: 760 }));
+    setStatus('BALCTEST segs=' + S.segments.length + ' balconies=' + (S.balconies ? S.balconies.length : 0));
+  }, 800);
+
+  if (location.search.includes('stairtest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'zh'; S.mode = 'stairhouse'; S.floorIdx = 'roof';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    S.stairStart = null; S.stairPrev = null;
+    window.WS.fitView();
+    const tap = (x, y) => window.INT.handleTap(window.WS.i2s({ x, y }));
+    tap(620, 560);
+    tap(620, 800);
+    tap(900, 800);
+    tap(900, 600);
+    setStatus('STAIRTEST segs=' + S.segments.length + ' stair=' + S.segments.filter(x => x.stair).length);
+  }, 800);
+
+  if (location.search.includes('sizhidimtest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'zh'; S.mode = 'select';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    const off = (txt) => ({ text: txt, adj: { on: false, door: '' } });
+    S.sizhi = {
+      up: { text: '巷', adj: { on: true, door: '7' } },
+      right: off('巷'), down: off('巷'), left: off('巷'),
+    };
+    window.WS.fitView();
+    window.UOR.rebuildSizhiDims();
+    render(); refreshList();
+    setStatus('SIZHIDIMTEST segs=' + S.segments.length + ' dims=' + S.segments.filter(x => x.sizhiDim).length);
+  }, 800);
 
   window.__ready = true;
 })();
