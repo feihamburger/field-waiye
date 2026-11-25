@@ -16,7 +16,7 @@ function exportCsv() {
   S.segments.forEach((sg, i) => {
     const corr = sg.len == null ? '' : hooks.corrected(sg).toFixed(4);
     rows.push([i + 1, '段', sg.len == null ? '' : sg.len.toFixed(4), sg.adj || '',
-      corr, hooks.thickValue(), sg.a.x.toFixed(1), sg.a.y.toFixed(1), sg.b.x.toFixed(1), sg.b.y.toFixed(1),
+      corr, (sg.thickCm != null ? sg.thickCm : hooks.thickValue()), sg.a.x.toFixed(1), sg.a.y.toFixed(1), sg.b.x.toFixed(1), sg.b.y.toFixed(1),
       sg.photo ? '有' : '']);
   });
   S.notes.forEach((nt, i) => {
@@ -124,7 +124,81 @@ function exportPdf() {
     else putText(txt, mp(nt.pos).x, mp(nt.pos).y - 12, 0, 8.5);
   });
 
-  doc.save('手稿电子版.pdf');
+  try {
+   const S2 = hooks.getState();
+   if (S2.sizhi && S2.segments.length) {
+     let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+     S2.segments.filter(sg => !sg.sizhiDim).forEach(sg => {
+       [sg.a, sg.b].forEach(p => {
+         minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x);
+         miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y);
+       });
+     });
+     const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+     const near = 150, far = 260, tick = 18;
+     const line = (x1, y1, x2, y2) => { const a2 = mp({ x: x1, y: y1 }), b2 = mp({ x: x2, y: y2 }); doc.line(a2.x, a2.y, b2.x, b2.y); };
+     const txtAt = (txt, x, y) => { const q = mp({ x, y }); doc.text(txt, q.x, q.y, { align: 'center' }); };
+     doc.setDrawColor(141, 110, 99); doc.setTextColor(109, 76, 65); doc.setFontSize(10);
+     const geoms = {
+       up:    { y: miny - far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: miny - near, dx: cx, dy: miny - far - 16, sign: -1 },
+       down:  { y: maxy + far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: maxy + near, dx: cx, dy: maxy + far + 16, sign: 1 },
+       right: { x: maxx + far, y1: miny, y2: maxy, horiz: false, tx: maxx + near, ty: cy, dx: maxx + far + 22, dy: cy, sign: 1 },
+       left:  { x: minx - far, y1: miny, y2: maxy, horiz: false, tx: minx - near, ty: cy, dx: minx - far - 22, dy: cy, sign: -1 },
+     };
+     ['up', 'right', 'down', 'left'].forEach(side => {
+       const it = S2.sizhi[side];
+       if (!it) return;
+       const g2 = geoms[side];
+       if (it.adj && it.adj.on) {
+         if (g2.horiz) {
+           line(g2.x1, g2.y, g2.x2, g2.y);
+           line(g2.x1, g2.y, g2.x1, g2.y + g2.sign * tick);
+           line(g2.x2, g2.y, g2.x2, g2.y + g2.sign * tick);
+         } else {
+           line(g2.x, g2.y1, g2.x, g2.y2);
+           line(g2.x, g2.y1, g2.x + g2.sign * tick, g2.y1);
+           line(g2.x, g2.y2, g2.x + g2.sign * tick, g2.y2);
+         }
+         if (it.adj.door) txtAt('#' + it.adj.door, g2.dx, g2.dy);
+       }
+       txtAt(it.text || '', g2.tx, g2.ty);
+     });
+   }
+  } catch (e) {}
+  try {
+   const S2 = hooks.getState();
+   (S2.doors || []).forEach(d => {
+     const p2 = mp(d.pos);
+     doc.setDrawColor(93, 64, 55); doc.setTextColor(93, 64, 55);
+     doc.setFontSize(11);
+     doc.text('#' + d.num, p2.x, p2.y - 6, { align: 'center' });
+     doc.line(p2.x, p2.y, p2.x, p2.y - 2);
+   });
+  } catch (e) {}
+  try {
+   const S2 = hooks.getState();
+   if (S2.signature) {
+     const sw = 120, sh = 44;
+     doc.addImage(S2.signature, 'PNG', W - 30 - sw, H - 24 - sh, sw, sh);
+   }
+ } catch (e) {}
+ try {
+   const S2 = hooks.getState();
+   if (typeof S2.north === 'number') {
+     const cx = 60, cy = H - 60, r = 16;
+     const rad = -S2.north * Math.PI / 180;
+     const pt = (vx, vy) => ({ x: cx + vx * Math.cos(rad) - vy * Math.sin(rad), y: cy + vx * Math.sin(rad) + vy * Math.cos(rad) });
+     const tip = pt(0, -r), l = pt(-6, 6), m = pt(0, 2), rr = pt(6, 6);
+     doc.setDrawColor(18, 58, 99); doc.setFillColor(18, 58, 99);
+     doc.circle(cx, cy, r);
+     doc.triangle(tip.x, tip.y, l.x, l.y, m.x, m.y, 'F');
+     doc.triangle(tip.x, tip.y, rr.x, rr.y, m.x, m.y, 'F');
+     doc.setFontSize(10); doc.setTextColor(18, 58, 99);
+     doc.text('N', cx, cy + r + 10, { align: 'center' });
+     doc.text('北向角 ' + S2.north.toFixed(1) + '°', cx, cy + r + 22, { align: 'center' });
+   }
+ } catch (e) {}
+ doc.save('手稿电子版.pdf');
 }
 
   window.EXP = {
