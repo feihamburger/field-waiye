@@ -6,7 +6,7 @@
 <title>外业测量 · 平板版</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#123a63">
-<link rel="stylesheet" href="style.css?v=151">
+<link rel="stylesheet" href="style.css?v=190">
 </head>
 <body>
 <header id="top">
@@ -18,10 +18,11 @@
   <select id="appModeSel">
     <option value="plan">附图识别</option>
     <option value="sketch">手绘</option>
+  <option value="zh">农村宅基地</option>
     <option value="jg">竣工图识别</option>
     <option value="unordered">无序识别</option>
   </select>
-  <span id="appVer" class="ver">v151</span>
+  <span id="appVer" class="ver">v160</span>
   <span id="status" class="status">未加载图纸</span>
   <span id="bleState" class="ble">蓝牙未连接</span>
   <button id="btnBleToggle">连接</button>
@@ -57,11 +58,16 @@
   <button data-mode="addline">加线</button>
   <button data-mode="split">分割</button>
   <button data-mode="note">点注</button>
+  <button id="btnMulti">多选</button>
+  <button id="btnMirror">镜像</button>
+  <button id="btnCopy">复制</button>
   <button id="btnClose">闭合</button>
   <button id="btnInputLen">输入</button>
   <button id="btnDelete">删除</button>
   <button id="btnUndo">撤回</button>
   <button id="btnClearAll">清空</button>
+</div>
+<div id="thickBar">
   <label class="thick">墙厚 <input id="thick" type="number" inputmode="numeric" value="20"></label>
   <select id="adj">
     <option value="">无属性</option>
@@ -80,6 +86,7 @@
   <button id="btnCropTrace">识别</button>
   <button id="btnInterior">内部</button>
   <button id="btnInteriorUndo">撤内部</button>
+  <button id="btnFcToDraw">转手绘</button>
 </div>
 <div id="sketchBar" style="display:none">
   <button id="btnUndoPoint">撤点</button>
@@ -90,6 +97,61 @@
   <button id="btnJgCrop">框选</button>
   <button id="btnJgTrace">识别</button>
   <button id="btnJgAdaptive">灰黄黑</button>
+  <button id="btnJgToDraw">转手绘</button>
+</div>
+<div id="zhInitModal">
+  <div class="pm-box">
+    <div class="sm-tip">新建宅基地</div>
+    <label>门牌号 <input id="zhHouseNo" inputmode="numeric" placeholder="如 18"></label>
+    <label>层数 <input id="zhFloors" inputmode="numeric" value="1"></label>
+    <div class="sm-btns">
+      <button id="zhInitOk">开始</button>
+      <button id="zhInitCancel">取消</button>
+    </div>
+  </div>
+</div>
+<div id="sizhiModal">
+  <div class="pm-box">
+    <div class="sm-tip">四至（默认「巷」，可修改）</div>
+    <label>上 <span class="cardHint" id="szHintUp"></span> <input id="szUp" value="巷"> <button id="szAdjU" class="adjBtn">无邻建</button> <input id="szDoorU" class="doorInput" placeholder="门牌" style="display:none"></label>
+    <label>右 <span class="cardHint" id="szHintR"></span> <input id="szRight" value="巷"> <button id="szAdjR" class="adjBtn">无邻建</button> <input id="szDoorR" class="doorInput" placeholder="门牌" style="display:none"></label>
+    <label>下 <span class="cardHint" id="szHintDown"></span> <input id="szDown" value="巷"> <button id="szAdjD" class="adjBtn">无邻建</button> <input id="szDoorD" class="doorInput" placeholder="门牌" style="display:none"></label>
+    <label>左 <span class="cardHint" id="szHintL"></span> <input id="szLeft" value="巷"> <button id="szAdjL" class="adjBtn">无邻建</button> <input id="szDoorL" class="doorInput" placeholder="门牌" style="display:none"></label>
+    <div class="sm-tip">「有邻建」会在该方向多画一条相邻建筑边，四至文字夹在两边之间</div>
+    <div class="sm-btns">
+      <button id="szSave">生成四至</button>
+      <button id="szClear">清除</button>
+      <button id="szClose">关闭</button>
+    </div>
+  </div>
+</div>
+<div id="compassModal">
+  <div class="pm-box">
+    <div class="sm-tip">固定姿势：屏幕朝上，左侧长边贴外墙（人在屋外）</div>
+    <div id="compassHeading" style="font-size:44px;font-weight:700;color:#123a63">--°</div>
+    <div id="compassStatus" class="sm-tip">等待传感器…</div>
+    <div class="sm-tip">参考边：<span id="compassRef">未选</span></div>
+    <div class="sm-tip">北向角：<span id="compassNorth">--</span></div>
+    <div class="sm-btns">
+      <button id="compassSave">确认</button>
+      <button id="compassClose">关闭</button>
+    </div>
+  </div>
+</div>
+<div id="zhBar" style="display:none">
+  <button id="btnZhRect">矩形</button>
+  <button id="btnZhCut">缺角四边形</button>
+  <button id="btnZhTrap">直角梯形</button>
+  <button id="btnZhRot">旋转90°</button>
+  <button id="btnZhToDraw">转手绘</button>
+  <button id="btnCompass">指北针</button>
+  <button id="btnZhDoor">门牌</button>
+  <button id="btnZhBalcony">阳台</button>
+  <button id="btnZhStair">梯屋</button>
+  <button id="btnZhSizhi">四至</button>
+  <button id="btnZhUndo">撤回</button>
+  <button id="btnZhFloors">层数</button>
+  <select id="zhFloorSel"></select>
 </div>
 <div id="moreRow">
   <button id="btnRelay">接收手机</button>
@@ -113,6 +175,7 @@
   <span id="infoLen"></span>
   <span id="infoAdj"></span>
   <span id="infoDir"></span>
+  <label class="infoThick">墙厚 <input id="infoThick" type="number" inputmode="numeric" placeholder="默认"></label>
   <span id="infoTotal"></span>
   <button id="btnInfoPhoto">拍照</button>
   <button id="btnInfoPick">选图</button>
@@ -147,21 +210,23 @@
 <script src="lib/pdf.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
 <script src="lib/mqtt.min.js"></script>
-<script src="js/relay.js?v=151"></script>
-<script src="js/geo.js?v=151"></script>
-<script src="js/state.js?v=151"></script>
-<script src="js/unordered-matcher.js?v=151"></script>
-<script src="js/ble-proto.js?v=151"></script>
-<script src="js/ble.js?v=151"></script>
-<script src="js/export.js?v=151"></script>
-<script src="js/recognize.js?v=151"></script>
-<script src="js/ui.js?v=151"></script>
-<script src="js/unordered.js?v=151"></script>
-<script src="js/jg-vector.js?v=151"></script>
-<script src="js/jg.js?v=151"></script>
-<script src="js/interactions.js?v=151"></script>
-<script src="js/sign.js?v=151"></script>
-<script src="js/selfcheck.js?v=151"></script>
-<script src="app.js?v=151"></script>
+<script src="js/relay.js?v=190"></script>
+<script src="js/geo.js?v=190"></script>
+<script src="js/state.js?v=190"></script>
+<script src="js/unordered-matcher.js?v=190"></script>
+<script src="js/ble-proto.js?v=190"></script>
+<script src="js/ble.js?v=190"></script>
+<script src="js/export.js?v=190"></script>
+<script src="js/recognize.js?v=190"></script>
+<script src="js/ui.js?v=190"></script>
+<script src="js/unordered.js?v=190"></script>
+<script src="js/jg-vector.js?v=190"></script>
+<script src="js/jg.js?v=190"></script>
+<script src="js/compass.js?v=190"></script>
+<script src="js/draw-tools.js?v=190"></script>
+<script src="js/interactions.js?v=190"></script>
+<script src="js/sign.js?v=190"></script>
+<script src="js/selfcheck.js?v=190"></script>
+<script src="app.js?v=190"></script>
 </body>
 </html>
