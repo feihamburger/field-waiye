@@ -86,8 +86,8 @@ function dedupeParallel(segs, tol, overlapRatio) {
       if (!merged) out.push({ ...s });
     }
     return out.map(o => vertical
-      ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: '' }
-      : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: '' });
+      ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: (window.defAdj ? window.defAdj() : '') }
+      : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: (window.defAdj ? window.defAdj() : '') });
   }
   return collapse(H, false).concat(collapse(V, true));
 }
@@ -119,8 +119,8 @@ function mergeCollinear(segs, ctol, gap) {
       if (!merged) out.push({ ...s });
     }
     return out.map(o => vertical
-      ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: '' }
-      : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: '' });
+      ? { a: { x: o.c, y: o.a0 }, b: { x: o.c, y: o.a1 }, len: null, adj: (window.defAdj ? window.defAdj() : '') }
+      : { a: { x: o.a0, y: o.c }, b: { x: o.a1, y: o.c }, len: null, adj: (window.defAdj ? window.defAdj() : '') });
   }
   return merge(H, false).concat(merge(V, true));
 }
@@ -152,9 +152,35 @@ function distToSeg(p, a, b) {
 function hitSegment(pt) {
   let best = null;
   S().segments.forEach((sg, i) => {
+    if (sg.noMeasure || sg.neighborStair) return;
     const a = W.i2s(sg.a), b = W.i2s(sg.b);
     const r = distToSeg(pt, a, b);
     if (r.d <= 24 && (!best || r.d < best.d)) best = { idx: i, d: r.d, t: r.t };
+  });
+  return best;
+}
+
+function hitTotal(pt) {
+  const S2 = S();
+  if (!S2.totals || !S2.totals.length) return null;
+  let cxx = 0, cyy = 0, np2 = 0;
+  S2.segments.forEach(sg => {
+    if (sg.balcony || sg.stair || sg.sizhiDim || sg.neighborWall) return;
+    cxx += sg.a.x + sg.b.x; cyy += sg.a.y + sg.b.y; np2 += 2;
+  });
+  cxx /= Math.max(1, np2); cyy /= Math.max(1, np2);
+  let best = null;
+  S2.totals.forEach((tt, idx) => {
+    if (!tt.a || !tt.b) return;
+    const dx = tt.b.x - tt.a.x, dy = tt.b.y - tt.a.y;
+    const L = Math.hypot(dx, dy) || 1;
+    let nx = -dy / L, ny = dx / L;
+    const midx = (tt.a.x + tt.b.x) / 2, midy = (tt.a.y + tt.b.y) / 2;
+    if ((midx - cxx) * nx + (midy - cyy) * ny < 0) { nx = -nx; ny = -ny; }
+    const a = W.i2s({ x: tt.a.x + nx * 70, y: tt.a.y + ny * 70 });
+    const b = W.i2s({ x: tt.b.x + nx * 70, y: tt.b.y + ny * 70 });
+    const r = distToSeg(pt, a, b);
+    if (r.d <= 26 && (!best || r.d < best.d)) best = { idx, d: r.d };
   });
   return best;
 }
@@ -173,7 +199,7 @@ function nextSegId() { const s = S(); s.segSeq = (s.segSeq || 1) + 1; return 's'
 function recordSplitTotal(sg, id1, id2) {
   const s = S();
   const id0 = sg.id || nextSegId();
-  s.totals.push({ a: { ...sg.a }, b: { ...sg.b }, len: sg.len, adj: sg.adj, children: [id1, id2], id: id0 });
+  s.totals.push({ a: { ...sg.a }, b: { ...sg.b }, len: sg.len, adj: sg.adj || '+0+0', children: [id1, id2], id: id0 });
   s.totals.forEach(tt => {
     if (tt.children) tt.children = tt.children.flatMap(c => c === id0 ? [id1, id2] : [c]);
   });
@@ -185,8 +211,9 @@ function splitSegment(i, t) {
   const pp = { x: sg.a.x + (sg.b.x - sg.a.x) * t, y: sg.a.y + (sg.b.y - sg.a.y) * t };
   const id1 = nextSegId(), id2 = nextSegId();
   recordSplitTotal(sg, id1, id2);
-  const s1 = { a: { ...sg.a }, b: { ...pp }, len: null, adj: sg.adj, id: id1 };
-  const s2 = { a: { ...pp }, b: { ...sg.b }, len: null, adj: sg.adj, id: id2 };
+  const dadj = sg.adj || '+0+0';
+  const s1 = { a: { ...sg.a }, b: { ...pp }, len: null, adj: dadj, id: id1 };
+  const s2 = { a: { ...pp }, b: { ...sg.b }, len: null, adj: dadj, id: id2 };
   S().segments.splice(i, 1, s1, s2);
   S().selected = { kind: 'seg', idx: i };
   W.render(); W.refreshList(); W.setStatus('已分割');
@@ -213,10 +240,107 @@ function snapToLines(ip) {
 }
 
 // 新线端点落到已有线上时，把已有线在该点断开（T 形接头）
-function splitAtPointInAll(ip, recordTotals) {
+function stairAdd(a, b, withLabel) {
+  const s = S();
+  const gid = s.stairGid;
+  const near = (p, q) => Math.abs(p.x - q.x) < 1 && Math.abs(p.y - q.y) < 1;
+  let merged = false;
+  for (let i = s.segments.length - 1; i >= 0; i--) {
+    const sg = s.segments[i];
+    if (!sg.stair || sg.stairId !== gid) continue;
+    const sameA = near(sg.a, a), sameB = near(sg.b, a);
+    if (!sameA && !sameB) continue;
+    const other = sameA ? sg.b : sg.a;
+    const dir = { x: a.x - other.x, y: a.y - other.y };
+    const newDir = { x: b.x - a.x, y: b.y - a.y };
+    const sameOrient = (Math.abs(sg.a.y - sg.b.y) < 1) === (Math.abs(b.y - a.y) < 1);
+    const forward = dir.x * newDir.x + dir.y * newDir.y > 0;
+    if (sameOrient && forward) {
+      if (sameA) sg.a = { ...b }; else sg.b = { ...b };
+      if (withLabel) sg.stairLabel = true;
+      merged = true;
+    }
+    break;
+  }
+  if (!merged) {
+    s.segments.push({ a: { ...a }, b: { ...b }, len: null, adj: (window.defAdj ? window.defAdj() : ''), stair: true, stairLabel: !!withLabel, stairId: gid });
+  }
+  return true;
+}
+
+function tidyStair(gid) {
+  const s = S();
+  let removed = 0;
+  s.segments = s.segments.filter(sg => {
+    if (sg.stair && sg.stairId === gid) {
+      const d = Math.hypot(sg.a.x - sg.b.x, sg.a.y - sg.b.y);
+      if (d < 1) { removed++; return false; }
+    }
+    return true;
+  });
+  return removed;
+}
+
+
+function shrinkImage(file, cb) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const maxD = 1200;
+      const sc2 = Math.min(1, maxD / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * sc2);
+      c.height = Math.round(img.height * sc2);
+      const g2 = c.getContext('2d');
+      g2.drawImage(img, 0, 0, c.width, c.height);
+      // 当天日期时间水印（烧录进照片，不可修改）
+      const d = new Date();
+      const pad = (n) => (n < 10 ? '0' + n : '' + n);
+      const wtxt = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+      const fs = Math.max(14, Math.round(c.width * 0.028));
+      g2.font = 'bold ' + fs + 'px sans-serif';
+      const tw = g2.measureText(wtxt).width;
+      const px = c.width - tw - fs, py = c.height - fs * 0.9;
+      g2.fillStyle = 'rgba(0,0,0,0.45)';
+      g2.fillRect(c.width - tw - fs * 1.6, c.height - fs * 1.8, tw + fs * 1.2, fs * 1.5);
+      g2.fillStyle = '#fff';
+      g2.textAlign = 'left'; g2.textBaseline = 'alphabetic';
+      g2.fillText(wtxt, px, py);
+      cb(c.toDataURL('image/jpeg', 0.75));
+    };
+    img.src = rd.result;
+  };
+  rd.readAsDataURL(file);
+}
+
+function wallDirName(sg) {
+  const S0 = S();
+  let cx = 0, cy = 0, np = 0;
+  S0.segments.forEach(g => {
+    if (g.balcony || g.stair || g.sizhiDim || g.neighborWall) return;
+    cx += g.a.x + g.b.x; cy += g.a.y + g.b.y; np += 2;
+  });
+  cx /= Math.max(1, np); cy /= Math.max(1, np);
+  const mx = (sg.a.x + sg.b.x) / 2, my = (sg.a.y + sg.b.y) / 2;
+  let ang = Math.atan2(mx - cx, -(my - cy)) * 180 / Math.PI;
+  const north = (typeof S0.north === 'number') ? S0.north : 0;
+  let bearing = ((north + ang) % 360 + 360) % 360;
+  const names = ['北', '东', '南', '西'];
+  let bi = 0, bd = 1e9;
+  [0, 90, 180, 270].forEach((b, i) => {
+    let d = Math.abs(((bearing - b) % 360 + 360) % 360);
+    d = Math.min(d, 360 - d);
+    if (d < bd) { bd = d; bi = i; }
+  });
+  return names[bi];
+}
+
+function splitAtPointInAll(ip, recordTotals, defAdj) {
   const tol = 8;
   for (let i = 0; i < S().segments.length; i++) {
     const sg = S().segments[i];
+    if (sg.neighborWall || sg.noMeasure) continue;
     const ax = sg.a.x, ay = sg.a.y, bx = sg.b.x, by = sg.b.y;
     const dx = bx - ax, dy = by - ay;
     const L2 = dx * dx + dy * dy || 1;
@@ -226,8 +350,9 @@ function splitAtPointInAll(ip, recordTotals) {
     if (Math.hypot(ip.x - q.x, ip.y - q.y) > tol) continue;
     const id1 = nextSegId(), id2 = nextSegId();
     if (recordTotals !== false) recordSplitTotal(sg, id1, id2);
-    S().segments[i] = { a: { ...sg.a }, b: { ...q }, len: null, adj: sg.adj, id: id1 };
-    S().segments.splice(i + 1, 0, { a: { ...q }, b: { ...sg.b }, len: null, adj: sg.adj, id: id2 });
+    const dadj = sg.adj || defAdj || '+0+0';
+    S().segments[i] = { a: { ...sg.a }, b: { ...q }, len: null, adj: dadj, id: id1 };
+    S().segments.splice(i + 1, 0, { a: { ...q }, b: { ...sg.b }, len: null, adj: dadj, id: id2 });
     i++;
   }
 }
@@ -307,7 +432,7 @@ function makeBalconyDraft() {
   const C = { x: x0 + w, y: y0 + d }, D = { x: x0, y: y0 + d };
   const gid = 'balc' + Date.now();
   [[A, B], [B, C], [C, D], [D, A]].forEach(([p1, p2], idx) => {
-    S2.segments.push({ a: { ...p1 }, b: { ...p2 }, len: null, adj: '', balcony: true, draft: true, balconyId: gid, balconyLabel: idx === 2 });
+    S2.segments.push({ a: { ...p1 }, b: { ...p2 }, len: null, adj: (window.defAdj ? window.defAdj() : ''), balcony: true, draft: true, balconyId: gid, balconyLabel: idx === 2 });
   });
   S2.balconyDragging = null;
   W.render();
@@ -335,12 +460,12 @@ function commitBalcony() {
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
   const y0 = Math.min(...ys), y1 = Math.max(...ys);
   let cx = 0, cy = 0, np = 0;
-  S2.segments.forEach(sg => { if (!sg.balcony) { cx += sg.a.x + sg.b.x; cy += sg.a.y + sg.b.y; np += 2; } });
+  S2.segments.forEach(sg => { if (!sg.balcony && !sg.neighborWall && !sg.stair && !sg.sizhiDim) { cx += sg.a.x + sg.b.x; cy += sg.a.y + sg.b.y; np += 2; } });
   cx /= Math.max(1, np); cy /= Math.max(1, np);
   // 找最近外墙
   let best = null;
   S2.segments.forEach(sg => {
-    if (sg.balcony) return;
+    if (sg.balcony || sg.neighborWall) return;
     const ax = sg.a.x, ay = sg.a.y, bx = sg.b.x, by = sg.b.y;
     const dx = bx - ax, dy = by - ay;
     const L2 = dx * dx + dy * dy || 1;
@@ -388,7 +513,296 @@ function commitBalcony() {
   W.setStatus('阳台已吸附并固定，墙面已分割');
 }
 
+let nbrEditing = null;
+function openNbrEditor(side, idx) {
+  const S2 = S();
+  const it = S2.sizhi && S2.sizhi[side];
+  if (!it || !it.adj) return;
+  const labels = it.adj.labels || [];
+  const lb = labels[idx] || {};
+  nbrEditing = { side, idx };
+  document.getElementById('nbrDoor').value = lb.door || '';
+  document.getElementById('nbrStruct').value = lb.struct || '';
+  document.getElementById('nbrFloors').value = lb.floors || '';
+  document.getElementById('nbrModal').classList.add('open');
+}
+
+function textAnchorAt(ip) {
+  const S2 = S();
+  const segs = S2.segments.filter(sg => !sg.stair && !sg.balcony && !sg.sizhiDim && !sg.neighborWall);
+  if (!segs.length) return null;
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  segs.forEach(sg => [sg.a, sg.b].forEach(p => {
+    minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x);
+    miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y);
+  }));
+  const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
+  const near = 150, far = 260;
+  const anchors = [];
+  if (S2.sizhi) {
+    const tp = {
+      up: [cx, miny - near], right: [maxx + near, cy],
+      down: [cx, maxy + near], left: [minx - near, cy],
+    };
+    const np = {
+      up: [cx, miny - far - 48], down: [cx, maxy + far + 48],
+      left: [minx - far - 70, cy], right: [maxx + far + 70, cy],
+    };
+    ['up', 'right', 'down', 'left'].forEach(side => {
+      const it = S2.sizhi[side];
+      if (!it) return;
+      anchors.push({ kind: 'sizhi', side, pos: { x: tp[side][0], y: tp[side][1] } });
+      if (it.adj && it.adj.on) {
+        const labels = it.adj.labels || [{ door: it.adj.door, struct: it.adj.struct, floors: it.adj.floors }];
+        labels.forEach((lb, idx) => {
+          if (!lb) return;
+          const frac = idx === 0 ? 0.28 : 0.72;
+          let p2;
+          if (side === 'up') p2 = { x: minx + (maxx - minx) * frac, y: miny - far - 36 };
+          else if (side === 'down') p2 = { x: minx + (maxx - minx) * frac, y: maxy + far + 36 };
+          else if (side === 'left') p2 = { x: minx - far - 40, y: miny + (maxy - miny) * frac };
+          else p2 = { x: maxx + far + 40, y: miny + (maxy - miny) * frac };
+          anchors.push({ kind: 'nbr', side, idx, pos: p2 });
+        });
+      }
+    });
+  }
+  (S2.doors || []).forEach((d, i) => anchors.push({ kind: 'door', idx: i, pos: d.pos }));
+  let best = null;
+  anchors.forEach(a => {
+    const q = W.i2s(a.pos), b = W.i2s(ip);
+    const d = Math.hypot(q.x - b.x, q.y - b.y);
+    if (d <= 46 && (!best || d < best.d)) best = { ...a, d };
+  });
+  return best;
+}
+
+
+function roofLoopPolygon() {
+  const segs = S().segments.filter(sg => !sg.stair && !sg.balcony && !sg.sizhiDim && !sg.neighborWall && !sg.roofOpen);
+  if (!segs.length) return null;
+  const key = (p) => p.x + ',' + p.y;
+  const adj = new Map();
+  segs.forEach((sg, i) => {
+    const ka = key(sg.a), kb = key(sg.b);
+    if (!adj.has(ka)) adj.set(ka, []);
+    if (!adj.has(kb)) adj.set(kb, []);
+    adj.get(ka).push({ i, other: sg.b, pt: sg.a });
+    adj.get(kb).push({ i, other: sg.a, pt: sg.b });
+  });
+  const first = segs[0];
+  const pts = [{ ...first.a }];
+  let curPt = { ...first.b };
+  const used = new Set([0]);
+  const firstKey = key(first.a);
+  let guard = 0;
+  while (guard++ < 400) {
+    pts.push({ ...curPt });
+    const nk = key(curPt);
+    if (nk === firstKey) break;
+    const cands = (adj.get(nk) || []).filter(c => !used.has(c.i));
+    if (!cands.length) break;
+    const nx = cands[0];
+    used.add(nx.i);
+    curPt = { ...nx.other };
+  }
+  return pts.length >= 3 ? pts : null;
+}
+
+function pointInPoly(p, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    const inter = ((yi > p.y) !== (yj > p.y)) && (p.x < (xj - xi) * (p.y - yi) / (yj - yi + 1e-12) + xi);
+    if (inter) inside = !inside;
+  }
+  return inside;
+}
+
+function applyRoofPick(tapPt) {
+  const S0 = S();
+  const rp = S0.roofPick;
+  if (!rp) return false;
+  const poly = roofLoopPolygon();
+  const chain0 = S0.segments.filter(sg => sg.stair && sg.stairId === rp.stairId);
+  if (!poly || !chain0.length) { S0.mode = 'select'; S0.roofPick = null; W.render(); return true; }
+  const kk = (p) => p.x + ',' + p.y;
+  const remain = chain0.map(sg => ({ a: { ...sg.a }, b: { ...sg.b } }));
+  let cur = rp.start ? { ...rp.start } : { ...remain[0].a };
+  const chainPts = [{ ...cur }];
+  const used = new Set();
+  let guard = 0;
+  while (used.size < remain.length && guard++ < 100) {
+    const ni = remain.findIndex((sg, i) => !used.has(i) && (kk(sg.a) === kk(cur) || kk(sg.b) === kk(cur)));
+    if (ni < 0) break;
+    used.add(ni);
+    cur = (kk(remain[ni].a) === kk(cur)) ? { ...remain[ni].b } : { ...remain[ni].a };
+    chainPts.push({ ...cur });
+  }
+  const A = chainPts[0], B = chainPts[chainPts.length - 1];
+  const idxOf = (pt) => poly.findIndex(p => Math.hypot(p.x - pt.x, p.y - pt.y) < 1);
+  const ia = idxOf(A), ib = idxOf(B);
+  if (ia < 0 || ib < 0) { W.setStatus('梯屋端点不在天面轮廓上'); S0.mode = 'select'; S0.roofPick = null; W.render(); return true; }
+  const arc1 = [];
+  for (let i = ia; ; i = (i + 1) % poly.length) { arc1.push(poly[i]); if (i === ib) break; }
+  const arc2 = [];
+  for (let i = ib; ; i = (i + 1) % poly.length) { arc2.push(poly[i]); if (i === ia) break; }
+  const poly1 = arc1.concat(chainPts.slice(1, -1).reverse());
+  const poly2 = arc2.concat(chainPts.slice(1, -1));
+  const in1 = pointInPoly(tapPt, poly1);
+  const in2 = pointInPoly(tapPt, poly2);
+  const dashArc = in1 ? arc2 : arc1;
+  const dashKeys = new Set();
+  for (let i = 0; i + 1 < dashArc.length; i++) {
+    dashKeys.add(kk(dashArc[i]) + '|' + kk(dashArc[i + 1]));
+    dashKeys.add(kk(dashArc[i + 1]) + '|' + kk(dashArc[i]));
+  }
+  S0.segments.forEach(sg => {
+    if (sg.stair || sg.balcony || sg.sizhiDim || sg.neighborWall) return;
+    const k = kk(sg.a) + '|' + kk(sg.b);
+    sg.roofOpen = dashKeys.has(k) || dashKeys.has(kk(sg.b) + '|' + kk(sg.a));
+  });
+  S0.mode = 'select';
+  S0.roofPick = null;
+  S0.selected = null;
+  W.render(); W.refreshList();
+  W.setStatus((in1 || in2) ? '已保留所选一侧：另一侧天面用虚线表示（露天）' : '点选位置不在天面内，请重试');
+  return true;
+}
+
+
+
+function buildOutlineLoop() {
+  const segs = S().segments.filter(sg => !sg.stair && !sg.balcony && !sg.sizhiDim && !sg.neighborWall && !sg.roofOpen);
+  if (segs.length < 3) return null;
+  const key = (p) => Math.round(p.x) + ',' + Math.round(p.y);
+  const adj = new Map();
+  segs.forEach((sg, i) => {
+    const ka = key(sg.a), kb = key(sg.b);
+    if (!adj.has(ka)) adj.set(ka, []);
+    if (!adj.has(kb)) adj.set(kb, []);
+    adj.get(ka).push({ i, other: sg.b });
+    adj.get(kb).push({ i, other: sg.a });
+  });
+  let startK = null;
+  for (const [k, list] of adj) { if (list.length === 2) { startK = k; break; } }
+  if (!startK) return null;
+  const pts = [startK];
+  const used = new Set();
+  let cur = startK;
+  let guard = 0;
+  while (guard++ < 500) {
+    const cands = (adj.get(cur) || []).filter(e => !used.has(e.i));
+    if (!cands.length) break;
+    const e = cands[0];
+    used.add(e.i);
+    const nk = key(e.other);
+    pts.push(nk);
+    if (nk === startK) break;
+    cur = nk;
+  }
+  if (pts.length < 4) return null;
+  return pts.slice(0, -1).map(k => {
+    const [x, y] = k.split(',').map(Number);
+    return { x, y };
+  });
+}
+
+function chainOrdered(start, stairId) {
+  const segs = S().segments.filter(sg => sg.stair && sg.stairId === stairId);
+  if (!segs.length) return null;
+  const kk = (p) => Math.round(p.x) + ',' + Math.round(p.y);
+  const remain = segs.map(sg => ({ a: { ...sg.a }, b: { ...sg.b } }));
+  const used = new Set();
+  let cur = { ...start };
+  const pts = [{ ...cur }];
+  let guard = 0;
+  while (used.size < remain.length && guard++ < 200) {
+    const ni = remain.findIndex((sg, i) => !used.has(i) && (kk(sg.a) === kk(cur) || kk(sg.b) === kk(cur)));
+    if (ni < 0) break;
+    used.add(ni);
+    cur = (kk(remain[ni].a) === kk(cur)) ? { ...remain[ni].b } : { ...remain[ni].a };
+    pts.push({ ...cur });
+  }
+  return pts;
+}
+
+function splitRoofRegions(A, B) {
+  const S0 = S();
+  const loop = buildOutlineLoop();
+  const rop = S0.roofPending;
+  const stairId = S0.segments.filter(sg => sg.stair).slice(-1)[0] && S0.segments.filter(sg => sg.stair).slice(-1)[0].stairId;
+  if (!loop) return false;
+  const nearIdx = (pt) => {
+    let bi = -1, bd = 1e9;
+    loop.forEach((p, i) => {
+      const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+      if (d < bd) { bd = d; bi = i; }
+    });
+    return bd <= 45 ? bi : -1;
+  };
+  const ia = nearIdx(A), ib = nearIdx(B);
+  if (ia < 0 || ib < 0) return false;
+  if (Math.hypot(A.x - B.x, A.y - B.y) < 5) return false;
+  const id = stairId || (rop && rop.stairId);
+  const chain = id ? chainOrdered(A, id) : [A, B];
+  if (!chain || chain.length < 2) return false;
+  let cpts = chain;
+  // 方向：从 A 到 B
+  if (Math.hypot(cpts[0].x - B.x, cpts[0].y - B.y) < Math.hypot(cpts[0].x - A.x, cpts[0].y - A.y)) cpts = cpts.slice().reverse();
+  const inner = cpts.slice(1, -1);
+  const arc1 = [], arc2 = [];
+  for (let i = ia; ; i = (i + 1) % loop.length) { arc1.push(loop[i]); if (i === ib) break; }
+  for (let i = ib; ; i = (i + 1) % loop.length) { arc2.push(loop[i]); if (i === ia) break; }
+  const poly1 = arc1.concat(inner.slice().reverse());
+  const poly2 = arc2.concat(inner);
+  S0.roofSplit = { polys: [poly1, poly2], arcs: [arc1, arc2] };
+  return true;
+}
+
+function commitRoofChoice(keepIndex) {
+  const S0 = S();
+  const rs = S0.roofSplit;
+  if (!rs) return;
+  const keepArc = rs.arcs[keepIndex];
+  const otherArc = rs.arcs[1 - keepIndex];
+  const kk = (p) => Math.round(p.x) + ',' + Math.round(p.y);
+  const dashKeys = new Set();
+  for (let i = 0; i + 1 < otherArc.length; i++) {
+    dashKeys.add(kk(otherArc[i]) + '|' + kk(otherArc[i + 1]));
+    dashKeys.add(kk(otherArc[i + 1]) + '|' + kk(otherArc[i]));
+  }
+  S0.segments.forEach(sg => {
+    if (sg.stair || sg.balcony || sg.sizhiDim || sg.neighborWall) return;
+    const k = kk(sg.a) + '|' + kk(sg.b);
+    sg.roofOpen = dashKeys.has(k) || dashKeys.has(kk(sg.b) + '|' + kk(sg.a));
+  });
+  // 记录保留区域重心，作为天面层高标注位置
+  const keepPoly = rs.polys[keepIndex];
+  if (keepPoly && keepPoly.length) {
+    let sx = 0, sy = 0;
+    keepPoly.forEach(q => { sx += q.x; sy += q.y; });
+    S0.roofHeightPos = { x: sx / keepPoly.length, y: sy / keepPoly.length };
+  }
+  S0.roofSplit = null;
+  S0.mode = 'select';
+  S0.selected = null;
+  W.render(); W.refreshList();
+  W.setStatus('已保留所选区域为实线，另一区域天面为虚线（露天）');
+}
+
 function handleTap(pt) {
+  if (S().mode === 'roofpick') {
+    const ip2 = W.s2i(pt);
+    const rs = S().roofSplit;
+    if (rs) {
+      const inA = pointInPoly(ip2, rs.polys[0]);
+      const inB = pointInPoly(ip2, rs.polys[1]);
+      if (inA || inB) commitRoofChoice(inA ? 0 : 1);
+      else W.setStatus('请点在两个天面区域内部');
+    }
+    return;
+  }
   const ip = W.s2i(pt);
 
   if (S().mode === 'crop') {
@@ -408,20 +822,21 @@ function handleTap(pt) {
   }
 
   if (S().mode === 'draw') {
+    const gp = window.snapGridPt ? window.snapGridPt(ip) : ip;
     if (!S().anchor) {
-      S().anchor = ip;
+      S().anchor = gp;
       W.setStatus('手绘：继续点，相邻点自动连线');
       W.render();
       return;
     }
     // 手绘强制横平竖直：取变化大的方向
     const a0 = S().anchor;
-    const b0 = (Math.abs(ip.x - a0.x) >= Math.abs(ip.y - a0.y))
-      ? { x: ip.x, y: a0.y }
-      : { x: a0.x, y: ip.y };
+    const b0 = (Math.abs(gp.x - a0.x) >= Math.abs(gp.y - a0.y))
+      ? { x: gp.x, y: a0.y }
+      : { x: a0.x, y: gp.y };
     if (Math.hypot(b0.x - a0.x, b0.y - a0.y) < 4) { W.setStatus('点得太近，往横向或纵向再点一下'); return; }
     pushUndo();
-    S().segments.push({ a: { ...a0 }, b: { ...b0 }, len: null, adj: '' });
+    S().segments.push({ a: { ...a0 }, b: { ...b0 }, len: null, adj: (window.defAdj ? window.defAdj() : '') });
     S().selected = { kind: 'seg', idx: S().segments.length - 1 };
     S().anchor = { ...b0 };
     W.setStatus('已加线段（横平竖直），可继续点下一点');
@@ -433,17 +848,17 @@ function handleTap(pt) {
     const snap = snapToGeometry(ip);
     if (!snap) { W.setStatus('斜线：起点必须靠近已有端点或线（30px 内）'); return; }
     if (!S().freeFrom) {
-      S().freeFrom = snap.p;
+      S().freeFrom = window.snapGridPt ? window.snapGridPt(snap.p) : snap.p;
       W.setStatus('斜线：起点已吸附到' + snap.kind + '，再点终点');
       W.render();
       return;
     }
-    const a = S().freeFrom, b = snap.p;
+    const a = S().freeFrom, b = window.snapGridPt ? window.snapGridPt(snap.p) : snap.p;
     if (Math.hypot(b.x - a.x, b.y - a.y) < 4) { W.setStatus('两点太近'); return; }
     pushUndo();
     splitAtPointInAll(a);
     splitAtPointInAll(b);
-    S().segments.push({ a: { ...a }, b: { ...b }, len: null, adj: '' });
+    S().segments.push({ a: { ...a }, b: { ...b }, len: null, adj: (window.defAdj ? window.defAdj() : '') });
     S().selected = { kind: 'seg', idx: S().segments.length - 1 };
     S().freeFrom = null;
     W.render(); W.refreshList();
@@ -465,43 +880,127 @@ function handleTap(pt) {
         const q = { x: ax + dx * tt, y: ay + dy * tt };
         const a2 = W.i2s(q), b2 = W.i2s(iss);
         const d = Math.hypot(a2.x - b2.x, a2.y - b2.y);
-        if (d <= 55 && (!best || d < best.d)) best = { d, q, horiz: Math.abs(by - ay) < Math.abs(bx - ax) };
+        if (d <= 55 && (!best || d < best.d)) best = { d, q, horiz: Math.abs(by - ay) < Math.abs(bx - ax), neighbor: !!sg.neighborWall, sg };
       });
       return best;
     };
     const hit = nearestWall();
     if (!S().stairStart) {
       if (!hit) { W.setStatus('梯屋：起点必须在墙线上（55px 内）'); return; }
+      // 一层：点邻墙 → 直接画一段向外挑出的线段（长度=两侧短线 36）
+      if (hit.neighbor && String(S().floorIdx) === '1') {
+        let bx = 0, by = 0, np = 0;
+        S().segments.forEach(sg => {
+          if (sg.neighborWall || sg.sizhiDim || sg.stair) return;
+          bx += sg.a.x + sg.b.x; by += sg.a.y + sg.b.y; np += 2;
+        });
+        bx /= Math.max(1, np); by /= Math.max(1, np);
+        let nx = hit.q.x - bx, ny = hit.q.y - by;
+        if (hit.horiz) { nx = 0; ny = ny >= 0 ? 1 : -1; }
+        else { ny = 0; nx = nx >= 0 ? 1 : -1; }
+        const L = 50;
+        const a = { ...hit.q };
+        const b = { x: a.x + nx * L, y: a.y + ny * L };
+        pushUndo();
+        S().segments.push({ a, b, len: null, adj: '', stair: true, neighborStair: true, noMeasure: true, stairId: 'nSt' + Date.now() });
+        // 在梯屋两侧生成默认 "#? A?" 文本框
+        const nside = hit.sg && hit.sg.neighborSide;
+        if (nside && S().sizhi && S().sizhi[nside] && S().sizhi[nside].adj) {
+          const adj2 = S().sizhi[nside].adj;
+          const along = 230, out = 36;
+          let p1, p2;
+          if (nside === 'up') { p1 = { x: a.x - along, y: a.y - out }; p2 = { x: a.x + along, y: a.y - out }; }
+          else if (nside === 'down') { p1 = { x: a.x - along, y: a.y + out }; p2 = { x: a.x + along, y: a.y + out }; }
+          else if (nside === 'left') { p1 = { x: a.x - out, y: a.y - along }; p2 = { x: a.x - out, y: a.y + along }; }
+          else { p1 = { x: a.x + out, y: a.y - along }; p2 = { x: a.x + out, y: a.y + along }; }
+          adj2.labels = [
+            { door: '?', struct: 'A', floors: '?', pos: p1 },
+            { door: '?', struct: 'A', floors: '?', pos: p2 },
+          ];
+        }
+        S().mode = 'select';
+        W.render(); W.refreshList();
+        W.setStatus('已添加邻墙梯屋线段（外挑 36）');
+        return;
+      }
+      const gq = window.snapGridPt ? window.snapGridPt(hit.q) : { ...hit.q };
+      if (hit.horiz) gq.y = hit.q.y; else gq.x = hit.q.x;
+      gq.x = Math.round(gq.x / 50) * 50;
+      gq.y = Math.round(gq.y / 50) * 50;
       pushUndo();
-      splitAtPointInAll(hit.q, false);
-      S().stairStart = { ...hit.q };
-      S().stairPrev = { ...hit.q };
+      splitAtPointInAll(gq, false);
+      S().stairStart = { ...gq };
+      S().stairPrev = { ...gq };
+      S().roofHeightPos = null;
+      S().stairGid = 'st' + Date.now();
       W.render();
       W.setStatus('梯屋：继续点内部转折点，会正交跟随；最后点墙上结束');
       return;
     }
     const prev = S().stairPrev;
     if (hit) {
-      // 结束：按墙朝向正交落到墙上
+      // 结束：正交落到点击处的墙上（必要时加一个肘点）
       const wallQ = { ...hit.q };
       const a = prev;
-      const b = hit.horiz ? { x: a.x, y: wallQ.y } : { x: wallQ.x, y: a.y };
+      const b = { ...wallQ };
+      if (window.snapGridPt) {
+        if (hit.horiz) b.x = window.snapGridPt(b).x; else b.y = window.snapGridPt(b).y;
+      }
+      if (Math.abs(b.x - a.x) < 4 && Math.abs(b.y - a.y) < 4) { W.setStatus('终点与上一点重合'); return; }
       pushUndo();
       splitAtPointInAll({ ...b }, false);
-      S().segments.push({ a: { ...a }, b: { ...b }, len: null, adj: '', stair: true, stairLabel: true, stairId: 'st' + Date.now() });
-      S().stairStart = null; S().stairPrev = null;
+      const stAdj = window.defAdj ? window.defAdj() : '';
+      if (Math.abs(b.x - a.x) > 4 || Math.abs(b.y - a.y) > 4) {
+        if (hit.horiz) {
+          const elbow = { x: b.x, y: a.y };
+          stairAdd(a, elbow, false); stairAdd(elbow, b, true);
+        } else if (Math.abs(b.y - a.y) > 4) {
+          const elbow = { x: b.x, y: a.y };
+          stairAdd(a, elbow, false); stairAdd(elbow, b, true);
+        } else {
+          stairAdd(a, b, true);
+        }
+      }
+      const st2 = S().stairStart ? { ...S().stairStart } : null;
+      tidyStair(S().stairGid);
+      const isRoof = String(S().floorIdx) === 'roof';
+      if (isRoof) {
+        S().stairStart = null; S().stairPrev = null; S().stairGid = null;
+        const ok = splitRoofRegions(st2, { ...b });
+        if (ok) {
+          S().mode = 'roofpick';
+          W.render(); W.refreshList();
+          W.setStatus('点一下要保留为实线的区域（另一区域为虚线露天天面）');
+        } else {
+          S().segments.forEach(sg => {
+            if (sg.stair || sg.balcony || sg.sizhiDim || sg.neighborWall) return;
+            sg.roofOpen = true;
+          });
+          S().mode = 'select';
+          W.render(); W.refreshList();
+          W.setStatus('天面轮廓切开失败，已按全部虚线处理');
+        }
+        return;
+      }
+      tidyStair(S().stairGid);
+      S().stairStart = null; S().stairPrev = null; S().stairGid = null;
       S().mode = 'select';
       W.render(); W.refreshList();
-      W.setStatus('梯屋已完成（两端连墙、墙面分割），可点选边输入长度');
+      W.setStatus('梯屋已完成');
       return;
     }
-    // 跟随拐弯：从上一点正交延伸
-    const cand = (Math.abs(iss.x - prev.x) >= Math.abs(iss.y - prev.y))
+    // 跟随拐弯：从上一点正交延伸（吸附最近格点）
+    let cand = (Math.abs(iss.x - prev.x) >= Math.abs(iss.y - prev.y))
       ? { x: iss.x, y: prev.y }
       : { x: prev.x, y: iss.y };
-    if (Math.hypot(cand.x - prev.x, cand.y - prev.y) < 8) return;
+    if (window.snapGridPt) {
+      cand = (Math.abs(iss.x - prev.x) >= Math.abs(iss.y - prev.y))
+        ? { x: Math.round(cand.x / 50) * 50, y: prev.y }
+        : { x: prev.x, y: Math.round(cand.y / 50) * 50 };
+    }
+    if (Math.abs(cand.x - prev.x) < 4 && Math.abs(cand.y - prev.y) < 4) return;
     pushUndo();
-    S().segments.push({ a: { ...prev }, b: { ...cand }, len: null, adj: '', stair: true, stairId: 'st' + Date.now() });
+    stairAdd(prev, cand, false);
     S().stairPrev = { ...cand };
     W.render(); W.refreshList();
     W.setStatus('梯屋：继续点，最后点墙上结束');
@@ -514,7 +1013,7 @@ function handleTap(pt) {
       // 先尝试吸附墙角（60 屏幕像素内）
       let corner = null;
       S().segments.forEach(sg => {
-        if (sg.balcony) return;
+        if (sg.balcony || sg.neighborWall) return;
         [sg.a, sg.b].forEach(p2 => {
           const a2 = W.i2s(p2), b2 = W.i2s(ipb);
           const dd = Math.hypot(a2.x - b2.x, a2.y - b2.y);
@@ -524,7 +1023,7 @@ function handleTap(pt) {
       // 找最近的墙，并投影到墙上
       let best = null;
       S().segments.forEach(sg => {
-        if (sg.balcony) return;
+        if (sg.balcony || sg.neighborWall) return;
         const ax = sg.a.x, ay = sg.a.y, bx = sg.b.x, by = sg.b.y;
         const dx = bx - ax, dy = by - ay;
         const L2 = dx * dx + dy * dy || 1;
@@ -541,7 +1040,17 @@ function handleTap(pt) {
       const ux = (best.bx - best.ax) / best.L, uy = (best.by - best.ay) / best.L;
       let nx = -uy, ny = ux;
       if ((best.q.x - cx) * nx + (best.q.y - cy) * ny > 0) { nx = -nx; ny = -ny; } // 指向内部
-      const startA = corner ? { ...corner.p } : { ...best.q };
+      let startA;
+      if (corner) startA = { ...corner.p };
+      else {
+        startA = { ...best.q };
+        if (!window.snapGridPt) { /* noop */ }
+        else if (Math.abs(best.bx - best.ax) >= Math.abs(best.by - best.ay)) {
+          startA = { x: window.snapGridPt(startA).x, y: startA.y };
+        } else {
+          startA = { x: startA.x, y: window.snapGridPt(startA).y };
+        }
+      }
       S().balconyFirst = { A: startA, u: { x: ux, y: uy }, n: { x: nx, y: ny } };
       S().mode = 'balcony';
       W.render();
@@ -550,8 +1059,9 @@ function handleTap(pt) {
     }
     const bf = S().balconyFirst;
     S().balconyFirst = null;
-    const du = (ipb.x - bf.A.x) * bf.u.x + (ipb.y - bf.A.y) * bf.u.y;
-    let dn = (ipb.x - bf.A.x) * bf.n.x + (ipb.y - bf.A.y) * bf.n.y;
+    const gp = window.snapGridPt ? window.snapGridPt(ipb) : ipb;
+    const du = (gp.x - bf.A.x) * bf.u.x + (gp.y - bf.A.y) * bf.u.y;
+    let dn = (gp.x - bf.A.x) * bf.n.x + (gp.y - bf.A.y) * bf.n.y;
     if (dn < 0) { dn = -dn; bf.n = { x: -bf.n.x, y: -bf.n.y }; }
     if (Math.abs(du) < 20 || dn < 20) { S().mode = 'select'; W.setStatus('阳台太小，已取消'); return; }
     const P0 = { ...bf.A };
@@ -559,12 +1069,36 @@ function handleTap(pt) {
     const P3 = { x: P0.x + bf.n.x * dn, y: P0.y + bf.n.y * dn };
     const P2 = { x: P3.x + bf.u.x * du, y: P3.y + bf.u.y * du };
     pushUndo();
-    splitAtPointInAll(P0, false);
-    splitAtPointInAll(P1, false);
+    // 阳台可能同时贴两面外墙：四个角所在的墙都要分割（并保留总长记录）
+    splitAtPointInAll(P0, true, '++');
+    splitAtPointInAll(P1, true, '++');
+    splitAtPointInAll(P3, true, '++');
+    splitAtPointInAll(P2, true, '++');
     const gid = 'balc' + Date.now();
-    S().segments.push({ a: { ...P0 }, b: { ...P3 }, len: null, adj: '', balcony: true, balconyId: gid, balconyLabel: false });
-    S().segments.push({ a: { ...P3 }, b: { ...P2 }, len: null, adj: '', balcony: true, balconyId: gid, balconyLabel: false });
-    S().segments.push({ a: { ...P2 }, b: { ...P1 }, len: null, adj: '', balcony: true, balconyId: gid, balconyLabel: true });
+    // 边若正好压在墙上（转角阳台贴两面墙），不重复画阳台边
+    const onWall = (p1, p2) => {
+      return S().segments.some(sg => {
+        if (sg.balcony || sg.stair || sg.sizhiDim || sg.neighborWall) return false;
+        const ax = sg.a.x, ay = sg.a.y, bx = sg.b.x, by = sg.b.y;
+        const dx = bx - ax, dy = by - ay;
+        const L2 = dx * dx + dy * dy || 1;
+        const dist = (p) => {
+          let tt = ((p.x - ax) * dx + (p.y - ay) * dy) / L2;
+          tt = Math.max(0, Math.min(1, tt));
+          const q = { x: ax + dx * tt, y: ay + dy * tt };
+          return Math.hypot(p.x - q.x, p.y - q.y);
+        };
+        return dist(p1) < 2 && dist(p2) < 2;
+      });
+    };
+    const edges = [[P0, P3], [P3, P2], [P2, P1]];
+    let added = 0;
+    edges.forEach(([a1, b1], k) => {
+      if (onWall(a1, b1)) return;
+      added++;
+      S().segments.push({ a: { ...a1 }, b: { ...b1 }, len: null, adj: (window.defAdj ? window.defAdj() : ''), balcony: true, balconyId: gid, balconyLabel: k === 2 });
+    });
+    if (!added) S().segments.push({ a: { ...P3 }, b: { ...P2 }, len: null, adj: (window.defAdj ? window.defAdj() : ''), balcony: true, balconyId: gid, balconyLabel: true });
     S().mode = 'select';
     W.render(); W.refreshList();
     W.setStatus('阳台已生成（墙面已分割），可点选阳台边输入长度');
@@ -574,12 +1108,38 @@ function handleTap(pt) {
   if (S().mode === 'door') {
     const num = S().doorPending || '';
     if (!num) { W.setStatus('门牌：先点「门牌」输入号码'); return; }
+    // 吸附到最近的外墙线
+    let best = null;
+    S().segments.forEach(sg => {
+      if (sg.balcony || sg.stair || sg.sizhiDim || sg.neighborWall || sg.noMeasure) return;
+      const ax = sg.a.x, ay = sg.a.y, bx = sg.b.x, by = sg.b.y;
+      const dx = bx - ax, dy = by - ay;
+      const L2 = dx * dx + dy * dy || 1;
+      let tt = ((ip.x - ax) * dx + (ip.y - ay) * dy) / L2;
+      tt = Math.max(0, Math.min(1, tt));
+      const q = { x: ax + dx * tt, y: ay + dy * tt };
+      const d = Math.hypot(ip.x - q.x, ip.y - q.y);
+      if (!best || d < best.d) best = { d, q, horiz: Math.abs(dy) < Math.abs(dx) };
+    });
+    if (!best) { W.setStatus('门牌：先画外墙'); return; }
+    let pos;
+    if (best.horiz) pos = { x: (window.snapGridPt ? window.snapGridPt(best.q).x : best.q.x), y: best.q.y };
+    else pos = { x: best.q.x, y: (window.snapGridPt ? window.snapGridPt(best.q).y : best.q.y) };
+    let cx = 0, cy = 0, np = 0;
+    S().segments.forEach(sg => {
+      if (sg.balcony || sg.stair || sg.sizhiDim || sg.neighborWall) return;
+      cx += sg.a.x + sg.b.x; cy += sg.a.y + sg.b.y; np += 2;
+    });
+    cx /= Math.max(1, np); cy /= Math.max(1, np);
     pushUndo();
-    S().doors.push({ pos: { ...ip }, num: String(num) });
+    S().doors = [{
+      pos, num: String(num), horiz: best.horiz,
+      in: best.horiz ? (cy - pos.y >= 0 ? 1 : -1) : (cx - pos.x >= 0 ? 1 : -1),
+    }];
     S().doorPending = null;
     S().mode = 'select';
     W.render(); W.refreshList();
-    W.setStatus('已添加门牌 #' + num);
+    W.setStatus('已放置门牌 #' + num + '（唯一，重新放置会替换）');
     return;
   }
 
@@ -600,7 +1160,7 @@ function handleTap(pt) {
       if (!isNaN(n)) v = n;
     }
     pushUndo();
-    S().notes.push({ pos: mid, a: first, b: ip, len: v, adj: '' });
+    S().notes.push({ pos: mid, a: first, b: ip, len: v, adj: (window.defAdj ? window.defAdj() : '') });
     S().selected = { kind: 'note', idx: S().notes.length - 1 };
     W.setStatus('已放数字，可点选后按徕卡测量');
     W.render(); W.refreshList();
@@ -609,13 +1169,13 @@ function handleTap(pt) {
 
   if (S().mode === 'addline') {
     if (!S().addFrom) {
-      { const sn = snapToGeometry(ip); S().addFrom = sn ? sn.p : ip; }
+      { const sn = snapToGeometry(ip); const base = sn ? sn.p : ip; S().addFrom = window.snapGridPt ? window.snapGridPt(base) : base; }
       W.setStatus('加线：起点已定，再点终点（自动吸附、横平竖直）');
       W.render();
       return;
     }
     const a = S().addFrom;
-    const snB = snapToGeometry(ip); const b = snB ? snB.p : ip;
+    const snB = snapToGeometry(ip); const rawB = snB ? snB.p : ip; const b = window.snapGridPt ? window.snapGridPt(rawB) : rawB;
     S().addFrom = null;
     let seg;
     if (Math.abs(b.x - a.x) >= Math.abs(b.y - a.y)) {
@@ -627,7 +1187,7 @@ function handleTap(pt) {
     pushUndo();
     splitAtPointInAll(seg.a);
     splitAtPointInAll(seg.b);
-    S().segments.push({ a: { ...seg.a }, b: { ...seg.b }, len: null, adj: '' });
+    S().segments.push({ a: { ...seg.a }, b: { ...seg.b }, len: null, adj: (window.defAdj ? window.defAdj() : '') });
     S().selected = { kind: 'seg', idx: S().segments.length - 1 };
     W.render(); W.refreshList();
     W.setStatus(`已加线并选中第 ${S().segments.length} 段，可直接测量`);
@@ -641,15 +1201,54 @@ function handleTap(pt) {
     }
     const idx = S().selected.idx;
     const sg = S().segments[idx];
+    let ipS = window.snapGridPt ? window.snapGridPt(ip) : ip;
+    // 保证落在该线段所在直线上（横墙记 y、竖墙记 x）
+    if (Math.abs(sg.b.x - sg.a.x) >= Math.abs(sg.b.y - sg.a.y)) ipS = { x: ipS.x, y: sg.a.y };
+    else ipS = { x: sg.a.x, y: ipS.y };
     const dx = sg.b.x - sg.a.x, dy = sg.b.y - sg.a.y;
     const L2 = dx * dx + dy * dy || 1;
-    let tt = ((ip.x - sg.a.x) * dx + (ip.y - sg.a.y) * dy) / L2;
+    let tt = ((ipS.x - sg.a.x) * dx + (ipS.y - sg.a.y) * dy) / L2;
     tt = Math.max(0, Math.min(1, tt));
     splitSegment(idx, tt);
     return;
   }
 
-  // 点选
+  // 点选图面文本（门牌/四至/邻建筑结构）→ 编辑
+  const txt = textAnchorAt(ip);
+  if (txt) {
+    if (txt.kind === 'door') {
+      S().selected = { kind: 'door', idx: txt.idx };
+      W.render(); W.refreshList(); renderInfoBar();
+      W.setStatus('已选门牌，可拍照或用「改号」修改号码');
+      return;
+    }
+    if (txt.kind === 'sizhi') {
+      const v = prompt('四至内容', S().sizhi[txt.side].text || '');
+      if (v != null) { S().sizhi[txt.side].text = v.trim(); W.render(); W.refreshList(); W.setStatus('四至已修改'); }
+      return;
+    }
+  }
+
+  // 点选层高标注
+  if (window.floorHeightAnchor) {
+    const hp = window.floorHeightAnchor();
+    if (hp) {
+      const q = W.i2s(hp), b = W.i2s(ip);
+      if (Math.hypot(q.x - b.x, q.y - b.y) <= 50) {
+        S().selected = { kind: 'height' };
+        W.setStatus('已选层高，可直接输入或用徕卡测量');
+        W.render(); W.refreshList(); renderInfoBar(); return;
+      }
+    }
+  }
+
+  // 点选（总长优先，因为它偏移在墙外）
+  const tot = hitTotal(pt);
+  if (tot) {
+    S().selected = { kind: 'total', idx: tot.idx };
+    W.setStatus('已选总长 ' + (tot.idx + 1) + '，按徕卡测量或手动输入');
+    W.render(); W.refreshList(); return;
+  }
   const hit = hitSegment(pt);
   if (hit) {
     S().selected = { kind: 'seg', idx: hit.idx };
@@ -691,7 +1290,7 @@ cv.addEventListener('pointerdown', (e) => {
     W.render();
     return;
   }
-  if (S().pointers.size === 1 && S().balconyDragging == null) {
+  if (S().pointers.size === 1 && S().balconyDragging == null && S().mode !== 'select') {
     const ip0 = W.s2i(pt);
     const g = balconyGroupHit(ip0);
     if (g) {
@@ -835,7 +1434,7 @@ function closeLoop() {
   }
   pushUndo();
   S().segments.push({
-    a: { ...ends[best.i] }, b: { ...ends[best.j] }, len: null, adj: '',
+    a: { ...ends[best.i] }, b: { ...ends[best.j] }, len: null, adj: (window.defAdj ? window.defAdj() : ''),
   });
   S().selected = { kind: 'seg', idx: S().segments.length - 1 };
   W.render(); W.refreshList();
@@ -952,6 +1551,17 @@ $('btnClearAll').onclick = () => {
 };
 $('btnPhoto').onclick = () => {
   if (!S().selected) { W.setStatus('先选中一条再拍照'); return; }
+  const sel = S().selected;
+  if (sel.kind === 'door') { S().photoTarget = { kind: 'door' }; $('photoInput').click(); return; }
+  if (sel.kind === 'thick') { S().photoTarget = { kind: 'thick' }; $('photoInput').click(); return; }
+  if (sel.kind === 'height') { S().photoTarget = { kind: 'structure', key: window.floorHeightKey() }; $('photoInput').click(); return; }
+  const it = W.itemOf(sel);
+  if (it && it.stair) { S().photoTarget = { kind: 'stair' }; $('photoInput').click(); return; }
+  if (sel.kind === 'seg' && String(S().floorIdx) === '1') {
+    const dir = wallDirName(it);
+    S().photoTarget = { kind: 'wall', dir };
+    $('photoInput').click(); return;
+  }
   $('photoInput').click();
 };
 $('btnPickPhoto').onclick = () => {
@@ -962,15 +1572,38 @@ $('photoInput').onchange = (e) => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  const it = W.itemOf(S().selected);
-  if (!it) return;
-  const rd = new FileReader();
-  rd.onload = () => {
-    it.photo = rd.result;
-    it.photoName = f.name;
-    W.refreshList(); W.setStatus('已关联照片：' + f.name);
-  };
-  rd.readAsDataURL(f);
+  const tgt = S().photoTarget;
+  S().photoTarget = null;
+  shrinkImage(f, (url) => {
+    const S0 = S();
+    S0.photoBind = S0.photoBind || { door: null, walls: [], structure: {}, stair: null, thick: null };
+    if (tgt && tgt.kind === 'door') {
+      S0.photoBind.door = { url, name: '门牌' };
+      W.setStatus('已保存门牌照片');
+    } else if (tgt && tgt.kind === 'wall') {
+      S0.photoBind.walls = S0.photoBind.walls || [];
+      S0.photoBind.walls.push({ url, dir: tgt.dir, name: '一层' + tgt.dir + '墙' });
+      W.setStatus('已保存一层' + tgt.dir + '墙照片');
+    } else if (tgt && tgt.kind === 'structure') {
+      S0.photoBind.structure = S0.photoBind.structure || {};
+      S0.photoBind.structure[tgt.key] = { url, name: '内部结构' };
+      W.setStatus('已保存内部结构照片');
+    } else if (tgt && tgt.kind === 'stair') {
+      S0.photoBind.stair = { url, name: '梯屋' };
+      W.setStatus('已保存梯屋照片');
+    } else if (tgt && tgt.kind === 'thick') {
+      S0.photoBind.thick = { url, name: '墙厚' };
+      W.setStatus('已保存墙厚照片');
+    } else {
+      const it = W.itemOf(S0.selected);
+      if (!it) return;
+      it.photo = url;
+      it.photoName = f.name;
+      W.refreshList();
+      W.setStatus('已关联照片：' + f.name);
+    }
+    W.render(); W.refreshList(); renderInfoBar();
+  });
 };
 $('btnViewPhoto').onclick = () => {
   const it = W.itemOf(S().selected);
@@ -1089,6 +1722,83 @@ $('btnApplyAdj').onclick = () => {
   W.setStatus('已设置属性 ' + (it.adj || '无'));
 };
 
+const PHOTO_SHEET_ITEMS = ['门牌', '一层东墙', '一层南墙', '一层西墙', '一层北墙', '墙厚', '内部结构', '梯屋', '（预留）'];
+function photoSheetItems() {
+  const pb = S().photoBind || {};
+  const out = [];
+  if (pb.door && pb.door.url) out.push({ name: '门牌', url: pb.door.url });
+  const walls = (pb.walls || []).filter(w => w && w.url);
+  const seen = {};
+  walls.forEach(w => {
+    if (seen[w.dir]) return;
+    seen[w.dir] = true;
+    out.push({ name: '一层' + w.dir + '墙', url: w.url });
+  });
+  const st = pb.structure || {};
+  let stKey = null;
+  if (st[2] && st[2].url) stKey = 2;
+  else {
+    const ks = Object.keys(st);
+    for (const k of ks) { if (st[k] && st[k].url) { stKey = k; break; } }
+  }
+  if (stKey && st[stKey].url) out.push({ name: '内部结构', url: st[stKey].url });
+  if (pb.stair && pb.stair.url) out.push({ name: '梯屋', url: pb.stair.url });
+  if (pb.thick && pb.thick.url) out.push({ name: '墙厚', url: pb.thick.url });
+  return out;
+}
+
+function buildPhotoSheetGrid() {
+  const g = document.getElementById('psGrid');
+  if (!g) return;
+  g.innerHTML = '';
+  const items = photoSheetItems();
+  if (!items.length) {
+    const d = document.createElement('div');
+    d.style.cssText = 'grid-column: 1 / -1; color:#90a4ae; font-size:14px; padding:12px; text-align:center;';
+    d.textContent = '还没有拍摄照片：点门牌 / 一层墙 / 层高 / 梯屋 / 墙厚后拍照，会出现在这里';
+    g.appendChild(d);
+    return;
+  }
+  items.forEach(it => {
+    const wrap = document.createElement('div');
+    wrap.className = 'ps-item';
+    const cell = document.createElement('div');
+    cell.className = 'ps-cell';
+    if (it && it.url) {
+      cell.textContent = '';
+      const img = document.createElement('img');
+      img.src = it.url;
+      img.style.cssText = 'max-width:100%; max-height:100%; border-radius:4px;';
+      cell.appendChild(img);
+    } else {
+      cell.textContent = '（待拍）';
+    }
+    const cap = document.createElement('div');
+    cap.className = 'ps-cap';
+    cap.textContent = it && it.name ? it.name : name;
+    wrap.appendChild(cell);
+    wrap.appendChild(cap);
+    g.appendChild(wrap);
+  });
+}
+$('btnPhotoSheet').onclick = () => {
+  const noEl = document.getElementById('psNo');
+  if (noEl) noEl.value = S().projectNo || '';
+  buildPhotoSheetGrid();
+  document.getElementById('photoSheetModal').classList.add('open');
+};
+$('psExportXlsx').onclick = () => {
+  const noEl = document.getElementById('psNo');
+  S().projectNo = noEl ? noEl.value.trim() : '';
+  window.EXP.exportPhotoSheetExcel(S().projectNo, photoSheetItems());
+};
+$('psClose').onclick = () => document.getElementById('photoSheetModal').classList.remove('open');
+$('psExport').onclick = () => {
+  const noEl = document.getElementById('psNo');
+  S().projectNo = noEl ? noEl.value.trim() : '';
+  window.EXP.exportPhotoSheet(S().projectNo, photoSheetItems());
+};
+
 $('btnCsv').onclick = () => window.EXP.exportCsv();
 $('btnPdf').onclick = () => window.EXP.exportPdf();
 
@@ -1146,13 +1856,92 @@ $('btnFinishDraw').onclick = () => {
   st.anchor = null;
   W.render(); W.setStatus('绘制完成，可点选线段输入/测量长度');
 };
+function photoButtonLabel() {
+  const S0 = S();
+  const sel = S0.selected;
+  const pb = S0.photoBind || {};
+  if (!sel) return '拍照';
+  if (sel.kind === 'door') return pb.door ? '覆盖' : '拍照';
+  if (sel.kind === 'thick') return pb.thick ? '覆盖' : '拍照';
+  if (sel.kind === 'height') {
+    const k = window.floorHeightKey();
+    return (pb.structure && pb.structure[k]) ? '覆盖' : '拍照';
+  }
+  const it = W.itemOf(sel);
+  if (it && it.stair) return pb.stair ? '覆盖' : '拍照';
+  if (sel.kind === 'seg' && String(S0.floorIdx) === '1' && it) {
+    const dir = wallDirName(it);
+    return (pb.walls || []).some(w => w.dir === dir) ? '覆盖' : '拍照';
+  }
+  if (it && it.photo) return '覆盖';
+  return '拍照';
+}
+
 function renderInfoBar() {
   const bar = document.getElementById('infoBar');
   if (!bar) return;
+  const selD = S().selected;
+  if (selD && selD.kind === 'door') {
+    const d = (S().doors || [])[selD.idx];
+    document.getElementById('infoTitle').textContent = '门牌 #' + (d ? d.num : '');
+    document.getElementById('infoLen').textContent = '一层门牌';
+    document.getElementById('infoAdj').textContent = '';
+    const liD = document.getElementById('infoLenInput');
+    if (liD) { liD.disabled = true; liD.value = ''; liD.placeholder = '门牌号'; }
+    const thD = document.getElementById('infoThick');
+    if (thD) { thD.disabled = true; thD.value = ''; thD.placeholder = '默认'; }
+    const dirD = document.getElementById('infoDir');
+    if (dirD) dirD.textContent = '';
+    const totD = document.getElementById('infoTotal');
+    if (totD) totD.textContent = '';
+    const pbD = document.getElementById('btnInfoPhoto');
+    if (pbD) pbD.textContent = photoButtonLabel();
+    return;
+  }
+  if (selD && selD.kind === 'thick') {
+    const thv = document.getElementById('thick');
+    document.getElementById('infoTitle').textContent = '墙厚';
+    document.getElementById('infoLen').textContent = (thv ? thv.value : '') + ' cm（默认墙厚）';
+    document.getElementById('infoAdj').textContent = '';
+    const liT = document.getElementById('infoLenInput');
+    if (liT) { liT.disabled = true; liT.value = ''; liT.placeholder = '墙厚'; }
+    const thT = document.getElementById('infoThick');
+    if (thT) { thT.disabled = true; thT.value = ''; thT.placeholder = '默认'; }
+    const dirT = document.getElementById('infoDir');
+    if (dirT) dirT.textContent = '';
+    const totT = document.getElementById('infoTotal');
+    if (totT) totT.textContent = '';
+    const pbT = document.getElementById('btnInfoPhoto');
+    if (pbT) pbT.textContent = photoButtonLabel();
+    return;
+  }
+  const selH = S().selected;
+  if (selH && selH.kind === 'height') {
+    const key = window.floorHeightKey();
+    const label = key === 'roof' ? '天面梯屋' : (key === 2 ? '二层及以上' : key + ' 层');
+    const v = (S().heights || {})[key];
+    document.getElementById('infoTitle').textContent = '层高（' + label + '）';
+    document.getElementById('infoLen').textContent = '数值：' + (v == null ? '未测' : v.toFixed(4) + ' m');
+    document.getElementById('infoAdj').textContent = '';
+    const liH = document.getElementById('infoLenInput');
+    if (liH) { liH.disabled = false; liH.placeholder = '米'; if (document.activeElement !== liH) liH.value = v == null ? '' : String(v); }
+    const thH = document.getElementById('infoThick');
+    if (thH) { thH.disabled = true; thH.value = ''; thH.placeholder = '默认'; }
+    const dirH = document.getElementById('infoDir');
+    if (dirH) dirH.textContent = '';
+    const totH = document.getElementById('infoTotal');
+    if (totH) totH.textContent = '';
+    const pbH = document.getElementById('btnInfoPhoto');
+    if (pbH) pbH.textContent = photoButtonLabel();
+    return;
+  }
+
   const it = W.itemOf(S().selected);
   if (!it) {
     document.getElementById('infoTitle').textContent = '未选中';
     document.getElementById('infoLen').textContent = '';
+    const li0 = document.getElementById('infoLenInput');
+    if (li0) { li0.value = ''; li0.disabled = true; li0.placeholder = '手动'; }
     document.getElementById('infoAdj').textContent = '';
     const tot0 = document.getElementById('infoTotal');
     if (tot0) tot0.textContent = '';
@@ -1173,6 +1962,14 @@ function renderInfoBar() {
   if (it.len != null && it.adj) adjTxt += '　修正后：' + W.corrected(it).toFixed(4) + ' m';
   document.getElementById('infoTitle').textContent = title;
   document.getElementById('infoLen').textContent = lenTxt;
+  const lenInp = document.getElementById('infoLenInput');
+  if (lenInp) {
+    const segSel = S().selected && S().selected.kind === 'seg';
+    lenInp.disabled = !segSel;
+    if (document.activeElement !== lenInp) {
+      lenInp.value = (segSel && it.len != null) ? it.len.toFixed(4) : '';
+    }
+  }
   document.getElementById('infoAdj').textContent = adjTxt;
   const thEl = document.getElementById('infoThick');
   if (thEl) {
@@ -1203,6 +2000,8 @@ function renderInfoBar() {
       totEl.textContent = '总长：' + sumT.toFixed(4) + ' m（' + S().totals.length + ' 段）' + (warn ? ' !' : '');
     } else totEl.textContent = '';
   }
+  const pbBtn = document.getElementById('btnInfoPhoto');
+  if (pbBtn) pbBtn.textContent = photoButtonLabel();
   const link = document.getElementById('infoPhotoLink');
   if (it.photo) { link.style.display = ''; link.href = it.photo; }
   else link.style.display = 'none';
@@ -1229,6 +2028,13 @@ $('infoThick').onchange = () => {
   else { sg.thickCm = v; W.setStatus('该墙墙厚已设为 ' + v + ' cm'); }
   W.render(); W.refreshList();
 };
+const _thickEl = document.getElementById('thick');
+if (_thickEl) _thickEl.addEventListener('click', () => {
+  S().selected = { kind: 'thick' };
+  W.render(); W.refreshList(); renderInfoBar();
+  W.setStatus('已选默认墙厚，可拍照');
+});
+window.thickOpenBound = true;
 $('btnInfoPhoto').onclick = () => { $('btnPhoto').onclick(); };
 $('btnInfoPick').onclick = () => { $('btnPickPhoto').onclick(); };
 $('btnSign').onclick = () => { if (window.SIGN) window.SIGN.open(); };
@@ -1360,6 +2166,61 @@ if (location.search.includes('uotest')) setTimeout(() => {
       paintTap: (ip) => handleTap(ip),
     });
   }
+
+  // 手动输入长度（与蓝牙回传共用）
+  (function bindInfoLen() {
+    const inp = document.getElementById('infoLenInput');
+    if (!inp) return;
+    const commit = () => {
+      const sel = S().selected;
+      if (sel && sel.kind === 'height') {
+        const key = window.floorHeightKey();
+        S().heights = S().heights || {};
+        const raw0 = (inp.value || '').trim();
+        if (raw0 === '') delete S().heights[key];
+        else {
+          const v0 = parseFloat(raw0);
+          if (isFinite(v0) && v0 > 0) S().heights[key] = v0;
+        }
+        W.render(); W.refreshList();
+        return;
+      }
+      if (!sel || (sel.kind !== 'seg' && sel.kind !== 'total')) return;
+      const it = sel.kind === 'total' ? S().totals[sel.idx] : S().segments[sel.idx];
+      if (!it) return;
+      const raw = (inp.value || '').trim();
+      if (raw === '') {
+        it.len = null;
+      } else {
+        const v = parseFloat(raw);
+        if (!isFinite(v) || v <= 0) return;
+        it.len = v;
+      }
+      W.render(); W.refreshList();
+    };
+    inp.addEventListener('change', commit);
+    inp.addEventListener('blur', commit);
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { commit(); inp.blur(); } });
+  })();
+
+  const _rkS = document.getElementById('roofKeepSmall');
+  if (_rkS) _rkS.onclick = () => {
+    const rp = S().roofPending;
+    if (rp) applyRoofChoice(rp.stairId, rp.start, rp.end, true);
+    S().roofPending = null;
+    document.getElementById('roofPickModal').classList.remove('open');
+    W.render(); W.refreshList();
+  };
+  const _rkL = document.getElementById('roofKeepLarge');
+  if (_rkL) _rkL.onclick = () => {
+    const rp = S().roofPending;
+    if (rp) applyRoofChoice(rp.stairId, rp.start, rp.end, false);
+    S().roofPending = null;
+    document.getElementById('roofPickModal').classList.remove('open');
+    W.render(); W.refreshList();
+  };
+
+  window.__ROOFDBG = { buildOutlineLoop, chainOrdered, splitRoofRegions, pointInPoly };
 
   window.INT = {
     init(h) { W = h; },
