@@ -183,3 +183,56 @@ button:active { transform: scale(0.97); }
 
 #infoBar .infoThick { display: flex; align-items: center; gap: 6px; font-size: 14px; }
 #infoBar .infoThick input { width: 64px; font-size: 14px; padding: 4px 6px; border-radius: 6px; border: 1px solid #d6c9a8; text-align: center; }
+
+#sizhiModal .noteInput { width: 110px; }
+
+#sizhiModal .structSel { width: 64px; }
+#sizhiModal .floorInput { width: 50px; }
+#sizhiModal .row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+#sizhiModal .pm-box { width: min(96vw, 900px); }
+#sizhiModal label { display: flex; flex-wrap: nowrap; width: 100%; gap: 6px; }
+#sizhiModal .doorInput { width: 64px; }
+#sizhiModal .structSel { width: 76px; }
+#sizhiModal .floorInput { width: 54px; }
+#sizhiModal .cardHint { min-width: 42px; }
+#sizhiModal label > input:first-of-type { width: 90px; }
+
+#sizhiModal label { justify-content: flex-start; flex-wrap: wrap; }
+#sizhiModal label > * { flex: 0 0 auto; }
+
+#nbrModal { display: none; position: fixed; inset: 0; z-index: 1004;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#nbrModal.open { display: flex; }
+#nbrModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+#nbrModal label { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; color: #123a63; }
+#nbrModal input { width: 120px; font-size: 15px; padding: 5px 8px; border: 1px solid #b9c8da; border-radius: 6px; }
+#nbrModal select { width: 120px; font-size: 15px; padding: 5px; border: 1px solid #b9c8da; border-radius: 6px; }
+#nbrModal .sm-btns { display: flex; gap: 8px; }
+#nbrModal button { font-size: 15px; padding: 8px 14px; border-radius: 8px; border: none; background: #123a63; color: #fff; }
+#nbrModal #nbrSave { background: #f5a623; color: #123a63; font-weight: 700; }
+
+#infoBar .infoLenBox { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; color: #123a63; }
+#infoBar #infoLenInput { width: 90px; font-size: 15px; padding: 4px 6px; border: 1px solid #b9c8da; border-radius: 6px; }
+
+#roofPickModal { display: none; position: fixed; inset: 0; z-index: 1005;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#roofPickModal.open { display: flex; }
+#roofPickModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
+#roofPickModal button { font-size: 15px; padding: 10px 14px; border-radius: 8px; border: none;
+  background: #123a63; color: #fff; }
+
+#photoSheetModal { display: none; position: fixed; inset: 0; z-index: 1006;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#photoSheetModal.open { display: flex; }
+#photoSheetModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px; width: min(96vw, 980px); max-height: 92vh; overflow: auto; }
+#photoSheetModal input { font-size: 15px; padding: 6px 8px; border: 1px solid #b9c8da; border-radius: 6px; width: 260px; }
+.ps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.ps-cell { border: 1px dashed #90a4ae; height: 100px; display: flex; align-items: center;
+  justify-content: center; color: #90a4ae; font-size: 13px; background: #fafafa; border-radius: 6px; }
+.ps-cap { text-align: center; font-size: 13px; color: #123a63; margin-top: 2px; }
+
+.ps-item { display: flex; flex-direction: column; }
