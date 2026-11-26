@@ -32,6 +32,14 @@
   function onMeasure(v) {
     if (!isFinite(v)) return;
     S.lastMeas = v;
+    if (S.selected && S.selected.kind === 'height') {
+      const key = window.floorHeightKey();
+      S.heights = S.heights || {};
+      S.heights[key] = v;
+      setStatus('层高已写入 ' + v.toFixed(4) + ' m');
+      render(); refreshList();
+      return;
+    }
     if (S.app === 'unordered') {
       S.lengths.push(v);
       renderUnordered();
@@ -285,7 +293,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v190';
+  if (verEl) verEl.textContent = 'v266';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
@@ -470,7 +478,7 @@
     ];
     const off = (txt) => ({ text: txt, adj: { on: false, door: '' } });
     S.sizhi = {
-      up: { text: '巷', adj: { on: true, door: '7' } },
+      up: { text: '巷', adj: { on: true, door: '7', struct: 'B', floors: '2', labels: [{ door: '7', struct: 'B', floors: '2' }, { door: '9', struct: 'C', floors: '3' }] } },
       right: off('巷'), down: off('巷'), left: off('巷'),
     };
     window.WS.fitView();
@@ -478,6 +486,369 @@
     render(); refreshList();
     setStatus('SIZHIDIMTEST segs=' + S.segments.length + ' dims=' + S.segments.filter(x => x.sizhiDim).length);
   }, 800);
+
+  if (location.search.includes('sizhidialog')) setTimeout(() => {
+    const sel = document.getElementById('appModeSel');
+    sel.value = 'zh'; sel.dispatchEvent(new Event('change'));
+    setTimeout(() => {
+      document.getElementById('zhHouseNo').value = '18';
+      document.getElementById('zhFloors').value = '3';
+      document.getElementById('zhInitOk').click();
+      setTimeout(() => {
+        document.getElementById('btnZhSizhi').click();
+        document.getElementById('szAdjU').click();
+        setStatus('SIZHIDIALOG ok');
+      }, 400);
+    }, 400);
+  }, 700);
+
+  if (location.search.includes('neighstairtest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'zh'; S.mode = 'select'; S.floorIdx = '1';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    const off = () => ({ text: '巷', adj: { on: false } });
+    S.sizhi = {
+      up: { text: '巷', adj: { on: true, door: '7', struct: 'B', floors: '2', labels: [{ door: '7', struct: 'B', floors: '2' }, { door: '9', struct: 'C', floors: '3' }] } },
+      right: off(), down: off(), left: off(),
+    };
+    window.WS.fitView();
+    window.UOR.rebuildSizhiDims();
+    render(); refreshList(); window.UOR.updateModeBars();
+    // 模拟点梯屋，然后点邻墙
+    document.getElementById('btnZhStair').click();
+    window.INT.handleTap(window.WS.i2s({ x: 620, y: 300 }));
+    setStatus('NEIGHSTAIRTEST segs=' + S.segments.length + ' stair=' + S.segments.filter(x => x.stair).length);
+  }, 900);
+
+  if (location.search.includes('nbrtest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, 1240, 1754);
+    S.img = c; S.app = 'zh'; S.mode = 'select'; S.floorIdx = '1';
+    S.segments = [
+      { a: { x: 220, y: 560 }, b: { x: 1020, y: 560 }, len: null, adj: '' },
+      { a: { x: 1020, y: 560 }, b: { x: 1020, y: 1160 }, len: null, adj: '' },
+      { a: { x: 1020, y: 1160 }, b: { x: 220, y: 1160 }, len: null, adj: '' },
+      { a: { x: 220, y: 1160 }, b: { x: 220, y: 560 }, len: null, adj: '' },
+    ];
+    window.WS.fitView();
+    render(); refreshList();
+    document.getElementById('btnZhSizhi').click();
+    document.getElementById('szAdjU').click();
+    document.getElementById('szAdjR').click();
+    document.getElementById('szDoorU').value = '7';
+    document.getElementById('szStructU').value = 'B';
+    document.getElementById('szFloorsU').value = '2';
+    document.getElementById('szDoorR').value = '9';
+    document.getElementById('szStructR').value = 'C';
+    document.getElementById('szFloorsR').value = '3';
+    document.getElementById('szSave').click();
+    setStatus('NBRTEST segs=' + S.segments.length);
+  }, 900);
+
+  if (location.search.includes('drawtoggle')) setTimeout(() => {
+    document.getElementById('btnZhToDraw').click();
+    setStatus('DRAWTOGGLE zhBar=' + getComputedStyle(document.getElementById('zhBar')).display +
+      ' sketchBar=' + getComputedStyle(document.getElementById('sketchBar')).display +
+      ' cancel=' + getComputedStyle(document.getElementById('btnSketchCancel')).display);
+  }, 1500);
+
+  if (location.search.includes('drawtogglecancel')) setTimeout(() => {
+    document.getElementById('btnZhToDraw').click();
+    setTimeout(() => document.getElementById('btnSketchCancel').click(), 500);
+    setTimeout(() => setStatus('DRAWTOGGLE2 zhBar=' + getComputedStyle(document.getElementById('zhBar')).display +
+      ' sketchBar=' + getComputedStyle(document.getElementById('sketchBar')).display +
+      ' cancel=' + getComputedStyle(document.getElementById('btnSketchCancel')).display), 800);
+  }, 1500);
+
+  if (location.search.includes('gridsnaptest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1'; S.zhDrawing = true;
+    S.segments = [];
+    window.WS.fitView();
+    S.mode = 'draw';
+    window.INT.handleTap(window.WS.i2s({ x: 233, y: 318 }));
+    window.INT.handleTap(window.WS.i2s({ x: 601, y: 316 }));
+    const sg = S.segments[0];
+    setStatus('GRIDSNAP a=' + (sg ? [sg.a.x, sg.a.y, sg.b.x, sg.b.y].join(',') : 'none'));
+  }, 900);
+
+  if (location.search.includes('splitsnaptest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1'; S.zhDrawing = true;
+    S.segments = [{ a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '' }];
+    S.selected = { kind: 'seg', idx: 0 };
+    S.mode = 'split';
+    window.WS.fitView();
+    window.INT.handleTap(window.WS.i2s({ x: 333, y: 550 }));
+    const s = S.segments.map(g => g.a.x + '-' + g.b.x).join(' | ');
+    setStatus('SPLITSNAP ' + s + ' adj=' + S.segments.map(g => g.adj).join('|') + ' totAdj=' + S.totals.map(x => x.adj).join('|'));
+  }, 900);
+
+  if (location.search.includes('balcsnaptest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1'; S.zhDrawing = true;
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '' },
+    ];
+    window.WS.fitView();
+    S.mode = 'balcony';
+    window.INT.handleTap(window.WS.i2s({ x: 650, y: 550 }));
+    window.INT.handleTap(window.WS.i2s({ x: 700, y: 850 }));
+    const pts = S.segments.filter(g => g.balcony).map(g => [g.a.x, g.a.y, g.b.x, g.b.y].join(','));
+    setStatus('BALCSNAP ' + pts.join(' | '));
+  }, 900);
+
+  if (location.search.includes('doorsnaptest')) setTimeout(() => {
+    const c = document.createElement('canvas');
+    c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1';
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '' },
+    ];
+    window.WS.fitView();
+    S.mode = 'door'; S.doorPending = '7';
+    window.INT.handleTap(window.WS.i2s({ x: 333, y: 590 }));
+    const d1 = JSON.parse(JSON.stringify(S.doors));
+    S.mode = 'door'; S.doorPending = '9';
+    window.INT.handleTap(window.WS.i2s({ x: 1080, y: 700 }));
+    setStatus('DOORSNAP ' + JSON.stringify(S.doors));
+  }, 900);
+
+  if (location.search.includes('leninputtest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1';
+    S.segments = [{ a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '' }];
+    S.selected = { kind: 'seg', idx: 0 };
+    window.WS.fitView(); render(); refreshList();
+    const inp = document.getElementById('infoLenInput');
+    inp.value = '12.345';
+    inp.dispatchEvent(new Event('change'));
+    setStatus('LENINPUT len=' + S.segments[0].len + ' input=' + inp.value + ' label=' + document.getElementById('infoLen').textContent);
+  }, 900);
+
+  if (location.search.includes('balc2test')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1'; S.zhDrawing = true;
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: 10, adj: '' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: 10, adj: '' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: 10, adj: '' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: 10, adj: '' },
+    ];
+    window.WS.fitView();
+    S.mode = 'balcony';
+    window.INT.handleTap(window.WS.i2s({ x: 1040, y: 555 }));
+    window.INT.handleTap(window.WS.i2s({ x: 700, y: 850 }));
+    const segs = S.segments.map(g => [g.a.x, g.a.y, g.b.x, g.b.y].join(','));
+    setStatus('BALC2 segs=' + segs.length + ' totals=' + S.totals.length + ' | ' + segs.join(' ; '));
+  }, 900);
+
+  if (location.search.includes('totalhittest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = '1'; S.zhDrawing = true;
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: 10, adj: '' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: 10, adj: '' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: 10, adj: '' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: 10, adj: '' },
+    ];
+    window.WS.fitView();
+    S.mode = 'balcony';
+    window.INT.handleTap(window.WS.i2s({ x: 1040, y: 555 }));
+    window.INT.handleTap(window.WS.i2s({ x: 700, y: 850 }));
+    S.mode = 'select';
+    window.INT.handleTap(window.WS.i2s({ x: 650, y: 480 }));
+    setStatus('TOTALHIT sel=' + JSON.stringify(S.selected) + ' totals=' + S.totals.length);
+  }, 900);
+
+  if (location.search.includes('floorsizhitest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.app = 'zh'; S.floorIdx = 1; S.zhDrawing = false;
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '' },
+    ];
+    window.WS.fitView();
+    window.UOR.zhSetFloors(4);
+    const off = () => ({ text: '巷', adj: { on: false } });
+    S.sizhi = { up: { text: '巷', adj: { on: true, door: '7', struct: 'B', floors: '2', labels: [{ door: '7', struct: 'B', floors: '2' }] } }, right: off(), down: off(), left: off() };
+    window.UOR.rebuildSizhiDims(); render(); refreshList();
+    const before = { sizhi: !!S.sizhi, nbr: S.segments.filter(sg => sg.neighborWall).length, idx: S.floorIdx, type: typeof S.floorIdx };
+    window.UOR.zhSwitchFloor('4');
+    const mid = { sizhi: !!S.sizhi, idx: S.floorIdx, type: typeof S.floorIdx };
+    window.UOR.zhSwitchFloor('1');
+    const after = { sizhi: !!S.sizhi, nbr: S.segments.filter(sg => sg.neighborWall).length, idx: S.floorIdx, type: typeof S.floorIdx };
+    setStatus('FLOORSIZHI bef=' + JSON.stringify(before) + ' mid=' + JSON.stringify(mid) + ' aft=' + JSON.stringify(after));
+  }, 900);
+
+  if (location.search.includes('roofpicktest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.floorIdx = 'roof'; window.UOR.setApp('zh'); window.WS.resizeCanvas(); S.zhDrawing = false;
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '+0+0' },
+    ];
+    window.WS.fitView();
+    S.mode = 'stairhouse';
+    window.INT.handleTap(window.WS.i2s({ x: 600, y: 555 }));
+    window.INT.handleTap(window.WS.i2s({ x: 600, y: 800 }));
+    window.INT.handleTap(window.WS.i2s({ x: 900, y: 555 }));
+    const mode1 = S.mode;
+    const splitOK = !!(S.roofSplit);
+    window.INT.handleTap(window.WS.i2s({ x: 700, y: 700 }));
+    const rs2 = S.roofSplit;
+    let dbg = 'none';
+    if (rs2) dbg = rs2.polys.map(pl => pl.length + ':' + pl.slice(0, 2).map(q => Math.round(q.x) + ',' + Math.round(q.y)).join('/')).join(' ; ');
+    setStatus('ROOFPICK splitOK=' + splitOK + ' mode=' + S.mode + ' open=' + S.segments.filter(g => g.roofOpen).length + ' segs=' + S.segments.length + ' split=' + dbg);
+  }, 900);
+
+  if (location.search.includes('roofdbg')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.floorIdx = 'roof'; window.UOR.setApp('zh'); window.WS.resizeCanvas();
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '+0+0' },
+    ];
+    window.WS.fitView();
+    S.mode = 'stairhouse';
+    window.INT.handleTap(window.WS.i2s({ x: 600, y: 555 }));
+    window.INT.handleTap(window.WS.i2s({ x: 600, y: 800 }));
+    window.INT.handleTap(window.WS.i2s({ x: 900, y: 555 }));
+    const g = window.__ROOFDBG;
+    const loop = g ? g.buildOutlineLoop() : null;
+    const stSeg = S.segments.filter(x => x.stair)[0];
+    const chain = (g && stSeg) ? g.chainOrdered({ ...stSeg.a }, stSeg.stairId) : null;
+    setStatus('ROOFDBG segs=' + S.segments.map(g => Math.round(g.a.x) + ',' + Math.round(g.a.y) + '-' + Math.round(g.b.x) + ',' + Math.round(g.b.y) + (g.stair ? 'S' : '')).join('|') + ' loop=' + (loop ? loop.map(p => Math.round(p.x) + ',' + Math.round(p.y)).join('|') : 'null') + ' chain=' + (chain ? chain.map(p => Math.round(p.x) + ',' + Math.round(p.y)).join('|') : 'null'));
+  }, 900);
+
+  if (location.search.includes('stairmergetest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.floorIdx = '1'; window.UOR.setApp('zh'); window.WS.resizeCanvas();
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '+0+0' },
+    ];
+    window.WS.fitView();
+    S.mode = 'stairhouse';
+    window.INT.handleTap(window.WS.i2s({ x: 603, y: 553 }));
+    window.INT.handleTap(window.WS.i2s({ x: 601, y: 698 }));
+    window.INT.handleTap(window.WS.i2s({ x: 602, y: 802 }));
+    window.INT.handleTap(window.WS.i2s({ x: 701, y: 801 }));
+    window.INT.handleTap(window.WS.i2s({ x: 702, y: 902 }));
+    const stair = S.segments.filter(g => g.stair).map(g => [g.a.x, g.a.y, g.b.x, g.b.y].join(','));
+    setStatus('STAIRMERGE count=' + stair.length + ' segs=' + stair.join(' | '));
+  }, 900);
+
+  if (location.search.includes('heighttest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.floorIdx = 1; window.UOR.setApp('zh'); window.WS.resizeCanvas();
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '+0+0' },
+    ];
+    window.WS.fitView(); render(); refreshList();
+    const hp = window.floorHeightAnchor();
+    window.INT.handleTap(window.WS.i2s(hp));
+    const inp = document.getElementById('infoLenInput');
+    const title = document.getElementById('infoTitle').textContent;
+    inp.value = '3.2';
+    inp.dispatchEvent(new Event('change'));
+    setStatus('HEIGHTTEST anchor=' + JSON.stringify(hp) + ' sel=' + JSON.stringify(S.selected) + ' title=' + title + ' h1=' + (S.heights && S.heights[1]) + ' info=' + document.getElementById('infoLen').textContent);
+  }, 900);
+
+  if (location.search.includes('photosheettest')) setTimeout(() => {
+    document.getElementById('btnPhotoSheet').click();
+    setStatus('PHOTOSHEET open=' + document.getElementById('photoSheetModal').classList.contains('open') + ' cells=' + document.querySelectorAll('#psGrid .ps-cell').length);
+  }, 900);
+
+  if (location.search.includes('photosheetdemo')) setTimeout(() => {
+    const mk = (txt, bg) => {
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300;
+      const g = c.getContext('2d'); g.fillStyle = bg; g.fillRect(0, 0, 400, 300);
+      g.fillStyle = '#fff'; g.font = 'bold 36px sans-serif'; g.textAlign = 'center'; g.fillText(txt, 200, 160);
+      return c.toDataURL('image/jpeg', 0.8);
+    };
+    S.photoBind = {
+      door: { url: mk('门牌', '#1565c0'), name: '门牌' },
+      walls: [{ url: mk('东墙', '#2e7d32'), dir: '东', name: '一层东墙' }],
+      structure: { 2: { url: mk('结构', '#6d4c41'), name: '内部结构' } },
+      stair: { url: mk('梯屋', '#8d6e63'), name: '梯屋' },
+      thick: { url: mk('墙厚', '#455a64'), name: '墙厚' },
+    };
+    document.getElementById('btnPhotoSheet').click();
+    setStatus('PHOTOSHEETDEMO items=5');
+  }, 900);
+
+  if (location.search.includes('photosheetexcel')) setTimeout(() => {
+    const mk = (txt, bg) => {
+      const c = document.createElement('canvas'); c.width = 400; c.height = 300;
+      const g = c.getContext('2d'); g.fillStyle = bg; g.fillRect(0, 0, 400, 300);
+      g.fillStyle = '#fff'; g.font = 'bold 36px sans-serif'; g.textAlign = 'center'; g.fillText(txt, 200, 170);
+      return c.toDataURL('image/jpeg', 0.8);
+    };
+    const items = [
+      { name: '门牌', url: mk('门牌', '#1565c0') },
+      { name: '一层东墙', url: mk('东墙', '#2e7d32') },
+      { name: '一层南墙', url: mk('南墙', '#ef6c00') },
+      { name: '内部结构', url: mk('结构', '#6d4c41') },
+      { name: '梯屋', url: mk('梯屋', '#8d6e63') },
+      { name: '墙厚', url: mk('墙厚', '#455a64') },
+    ];
+    window.EXP.exportPhotoSheetExcel('（2025）复23B800-042', items).then(len => {
+      setStatus('XLSX len=' + len);
+    }).catch(e => setStatus('XLSX ERR ' + e.message));
+  }, 1200);
+
+  if (location.search.includes('photobtntest')) setTimeout(() => {
+    const c = document.createElement('canvas'); c.width = 1240; c.height = 1754;
+    S.img = c; S.floorIdx = 1; window.UOR.setApp('zh'); window.WS.resizeCanvas();
+    S.segments = [
+      { a: { x: 250, y: 550 }, b: { x: 1050, y: 550 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 550 }, b: { x: 1050, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 1050, y: 1150 }, b: { x: 250, y: 1150 }, len: null, adj: '+0+0' },
+      { a: { x: 250, y: 1150 }, b: { x: 250, y: 550 }, len: null, adj: '+0+0' },
+    ];
+    S.doors = [{ pos: { x: 600, y: 550 }, num: '18', horiz: true, in: 1 }];
+    S.selected = { kind: 'door', idx: 0 };
+    render(); refreshList();
+    window.INT.renderInfoBar();
+    const before = document.getElementById('btnInfoPhoto').textContent;
+    S.photoBind = { door: { url: 'x', name: '门牌' }, walls: [], structure: {}, stair: null, thick: null };
+    window.INT.renderInfoBar();
+    const after = document.getElementById('btnInfoPhoto').textContent;
+    setStatus('PHOTOBTN before=' + before + ' after=' + after);
+  }, 900);
+
+  if (location.search.includes('cjkfonttest')) setTimeout(() => {
+    window.EXP.ensureCJK(() => {
+      setStatus('CJKFONT width=' + window.EXP.fontWidth() + ' b64=' + (window.CJK_FONT_B64 ? window.CJK_FONT_B64.length : 0));
+    });
+  }, 900);
 
   window.__ready = true;
 })();
