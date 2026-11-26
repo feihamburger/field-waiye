@@ -1,9 +1,12 @@
-const CACHE = 'waice-v18';
+const CACHE = 'waice-v19';
 const FILES = [
   './',
   './index.html',
   './style.css',
   './app.js', './js/state.js', './js/unordered-matcher.js', './js/ble-proto.js', './js/ble.js', './js/export.js', './js/recognize.js', './js/ui.js', './js/unordered.js', './js/interactions.js', './js/jg.js', './js/selfcheck.js', './js/sign.js', './js/relay.js', './js/geo.js', './js/phone.js', './js/jg-vector.js',
+  './js/defaults.js',
+  './lib/exceljs.min.js',
+  './phone.html',
   './manifest.webmanifest',
   './lib/pdf.min.js',
   './lib/pdf.worker.min.js',
