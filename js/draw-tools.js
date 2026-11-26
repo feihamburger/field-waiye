@@ -52,7 +52,7 @@
     if (!drag) return;
     if (!drag.started) { drag.started = true; if (hooks.pushUndo) hooks.pushUndo(); }
     const S = hooks.getState();
-    const q = { x: ip.x, y: ip.y };
+    const q = window.snapGridPt ? window.snapGridPt(ip) : { x: ip.x, y: ip.y };
     S.segments.forEach(sg => {
       if (same(sg.a, drag.origin)) sg.a = { ...q };
       if (same(sg.b, drag.origin)) sg.b = { ...q };
