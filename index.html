@@ -6,14 +6,12 @@
 <title>外业测量 · 平板版</title>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#123a63">
-<link rel="stylesheet" href="style.css?v=190">
+<link rel="stylesheet" href="style.css?v=266">
 </head>
 <body>
 <header id="top">
   <button id="btnOpen" class="primary">打开</button>
   <button id="btnFit">适应</button>
-  <button id="btnZoomIn">放大</button>
-  <button id="btnZoomOut">缩小</button>
   <button id="btnRot">旋转</button>
   <select id="appModeSel">
     <option value="plan">附图识别</option>
@@ -70,9 +68,10 @@
 <div id="thickBar">
   <label class="thick">墙厚 <input id="thick" type="number" inputmode="numeric" value="20"></label>
   <select id="adj">
-    <option value="">无属性</option>
+    <option value="+0+0">+0+0</option>
     <option value="++">++</option>
     <option value="+-">+-</option>
+    <option value="-+">-+</option>
     <option value="--">--</option>
   </select>
   <button id="btnAutoAcc">累加:关</button>
@@ -89,6 +88,7 @@
   <button id="btnFcToDraw">转手绘</button>
 </div>
 <div id="sketchBar" style="display:none">
+      <button id="btnSketchCancel" style="display:none;background:#f5a623;color:#1b2a41;font-weight:700">取消手绘</button>
   <button id="btnUndoPoint">撤点</button>
   <button id="btnFinishDraw">完成</button>
   <button id="btnAdjust">平差</button>
@@ -110,13 +110,48 @@
     </div>
   </div>
 </div>
+<div id="photoSheetModal">
+  <div class="pm-box">
+    <div class="sm-tip">现场实景拍摄相片</div>
+    <label>工程编号 <input id="psNo" placeholder="（2025）复23B800-042"></label>
+    <div id="psGrid" class="ps-grid"></div>
+    <div class="sm-btns">
+      <button id="psExport">导出 PDF</button>
+      <button id="psExportXlsx">导出 Excel</button>
+      <button id="psClose">关闭</button>
+    </div>
+  </div>
+</div>
+<div id="roofPickModal">
+  <div class="pm-box">
+    <div class="sm-tip">天面梯屋：保留哪一侧为实线？</div>
+    <div class="sm-btns">
+      <button id="roofKeepSmall">梯屋侧（小区域）</button>
+      <button id="roofKeepLarge">其余天面（大区域）</button>
+    </div>
+    <div class="sm-tip">另一侧会用虚线表示（有底板、无屋顶的露天天面）</div>
+  </div>
+</div>
+<div id="nbrModal">
+  <div class="pm-box">
+    <div class="sm-tip">邻墙信息</div>
+    <label>门牌 <input id="nbrDoor" inputmode="numeric" placeholder="2"></label>
+    <label>结构 <select id="nbrStruct"><option value="">-</option><option>A</option><option>B</option><option>C</option></select></label>
+    <label>层数 <input id="nbrFloors" inputmode="numeric" placeholder="3"></label>
+    <div class="sm-btns">
+      <button id="nbrSave">保存</button>
+      <button id="nbrDel">删除</button>
+      <button id="nbrClose">关闭</button>
+    </div>
+  </div>
+</div>
 <div id="sizhiModal">
   <div class="pm-box">
     <div class="sm-tip">四至（默认「巷」，可修改）</div>
-    <label>上 <span class="cardHint" id="szHintUp"></span> <input id="szUp" value="巷"> <button id="szAdjU" class="adjBtn">无邻建</button> <input id="szDoorU" class="doorInput" placeholder="门牌" style="display:none"></label>
-    <label>右 <span class="cardHint" id="szHintR"></span> <input id="szRight" value="巷"> <button id="szAdjR" class="adjBtn">无邻建</button> <input id="szDoorR" class="doorInput" placeholder="门牌" style="display:none"></label>
-    <label>下 <span class="cardHint" id="szHintDown"></span> <input id="szDown" value="巷"> <button id="szAdjD" class="adjBtn">无邻建</button> <input id="szDoorD" class="doorInput" placeholder="门牌" style="display:none"></label>
-    <label>左 <span class="cardHint" id="szHintL"></span> <input id="szLeft" value="巷"> <button id="szAdjL" class="adjBtn">无邻建</button> <input id="szDoorL" class="doorInput" placeholder="门牌" style="display:none"></label>
+    <label>上 <span class="cardHint" id="szHintUp"></span> <input id="szUp" value="巷"> <button id="szAdjU" class="adjBtn">无邻建</button> <input id="szDoorU" class="doorInput" placeholder="门牌" style="display:none"> <select id="szStructU" class="structSel" style="display:none"><option value="">结构</option><option>A</option><option>B</option><option>C</option></select> <input id="szFloorsU" class="floorInput" placeholder="层" style="display:none"></label>
+    <label>右 <span class="cardHint" id="szHintR"></span> <input id="szRight" value="巷"> <button id="szAdjR" class="adjBtn">无邻建</button> <input id="szDoorR" class="doorInput" placeholder="门牌" style="display:none"> <select id="szStructR" class="structSel" style="display:none"><option value="">结构</option><option>A</option><option>B</option><option>C</option></select> <input id="szFloorsR" class="floorInput" placeholder="层" style="display:none"></label>
+    <label>下 <span class="cardHint" id="szHintDown"></span> <input id="szDown" value="巷"> <button id="szAdjD" class="adjBtn">无邻建</button> <input id="szDoorD" class="doorInput" placeholder="门牌" style="display:none"> <select id="szStructD" class="structSel" style="display:none"><option value="">结构</option><option>A</option><option>B</option><option>C</option></select> <input id="szFloorsD" class="floorInput" placeholder="层" style="display:none"></label>
+    <label>左 <span class="cardHint" id="szHintL"></span> <input id="szLeft" value="巷"> <button id="szAdjL" class="adjBtn">无邻建</button> <input id="szDoorL" class="doorInput" placeholder="门牌" style="display:none"> <select id="szStructL" class="structSel" style="display:none"><option value="">结构</option><option>A</option><option>B</option><option>C</option></select> <input id="szFloorsL" class="floorInput" placeholder="层" style="display:none"></label>
     <div class="sm-tip">「有邻建」会在该方向多画一条相邻建筑边，四至文字夹在两边之间</div>
     <div class="sm-btns">
       <button id="szSave">生成四至</button>
@@ -152,8 +187,12 @@
   <button id="btnZhUndo">撤回</button>
   <button id="btnZhFloors">层数</button>
   <select id="zhFloorSel"></select>
+      <button id="btnZhSelect">点选</button>
 </div>
 <div id="moreRow">
+  <button id="btnPhotoSheet">相片表</button>
+  <button id="btnZoomIn">放大</button>
+  <button id="btnZoomOut">缩小</button>
   <button id="btnRelay">接收手机</button>
   <button id="btnGeo">定位</button>
   <button id="btnSign">签名</button>
@@ -172,7 +211,7 @@
 
 <div id="infoBar">
   <span id="infoTitle">未选中</span>
-  <span id="infoLen"></span>
+  <span id="infoLen"></span><label class="infoLenBox">输入 <input id="infoLenInput" type="number" inputmode="decimal" step="0.001" placeholder="米"></label>
   <span id="infoAdj"></span>
   <span id="infoDir"></span>
   <label class="infoThick">墙厚 <input id="infoThick" type="number" inputmode="numeric" placeholder="默认"></label>
@@ -199,34 +238,36 @@
   </div>
 </div>
 <pre id="bleLog" style="display:none;margin:0;padding:6px 10px;max-height:160px;overflow:auto;background:#0b1b2b;color:#9fe;font-size:12px;white-space:pre-wrap;"></pre>
-<section id="panel">
+<section id="panel" class="collapsed">
   <div class="panel-head">
     <span id="panelTitle">线段 / 注记</span>
-    <button id="btnPanel" class="small">收起</button>
+    <button id="btnPanel" class="small">展开</button>
   </div>
   <div id="list" class="list"></div>
 </section>
 
 <script src="lib/pdf.min.js"></script>
 <script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/exceljs.min.js?v=266"></script>
 <script src="lib/mqtt.min.js"></script>
-<script src="js/relay.js?v=190"></script>
-<script src="js/geo.js?v=190"></script>
-<script src="js/state.js?v=190"></script>
-<script src="js/unordered-matcher.js?v=190"></script>
-<script src="js/ble-proto.js?v=190"></script>
-<script src="js/ble.js?v=190"></script>
-<script src="js/export.js?v=190"></script>
-<script src="js/recognize.js?v=190"></script>
-<script src="js/ui.js?v=190"></script>
-<script src="js/unordered.js?v=190"></script>
-<script src="js/jg-vector.js?v=190"></script>
-<script src="js/jg.js?v=190"></script>
-<script src="js/compass.js?v=190"></script>
-<script src="js/draw-tools.js?v=190"></script>
-<script src="js/interactions.js?v=190"></script>
-<script src="js/sign.js?v=190"></script>
-<script src="js/selfcheck.js?v=190"></script>
-<script src="app.js?v=190"></script>
+<script src="js/relay.js?v=266"></script>
+<script src="js/geo.js?v=266"></script>
+<script src="js/defaults.js?v=266"></script>
+<script src="js/state.js?v=266"></script>
+<script src="js/unordered-matcher.js?v=266"></script>
+<script src="js/ble-proto.js?v=266"></script>
+<script src="js/ble.js?v=266"></script>
+<script src="js/export.js?v=266"></script>
+<script src="js/recognize.js?v=266"></script>
+<script src="js/ui.js?v=266"></script>
+<script src="js/unordered.js?v=266"></script>
+<script src="js/jg-vector.js?v=266"></script>
+<script src="js/jg.js?v=266"></script>
+<script src="js/compass.js?v=266"></script>
+<script src="js/draw-tools.js?v=266"></script>
+<script src="js/interactions.js?v=266"></script>
+<script src="js/sign.js?v=266"></script>
+<script src="js/selfcheck.js?v=266"></script>
+<script src="app.js?v=266"></script>
 </body>
 </html>
