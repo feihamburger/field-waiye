@@ -48,12 +48,13 @@ function refreshList() {
   try {
     if (S.selected) {
       const it = itemOf(S.selected);
-      hooks.$('adj').value = it && it.adj ? it.adj : '';
+      hooks.$('adj').value = it && it.adj ? it.adj : '+0+0';
     }
   } catch (e) {}
   const list = hooks.$('list');
   list.innerHTML = '';
   S.segments.forEach((sg, i) => {
+    if (sg.neighborStair || sg.neighborWall) return;
     const div = document.createElement('div');
     div.className = 'row' + (S.selected && S.selected.kind === 'seg' && S.selected.idx === i ? ' sel' : '');
     const val = sg.len == null ? '?' : sg.len.toFixed(3) + ' m';
