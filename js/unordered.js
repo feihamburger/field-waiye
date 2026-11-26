@@ -107,11 +107,11 @@ function buildZhShape(kind) {
   ensureA4();
   const S = hooks.getState();
   // 矩形
-  const rect = [[220, 560], [1020, 560], [1020, 1160], [220, 1160]];
+  const rect = [[250, 550], [1050, 550], [1050, 1150], [250, 1150]];
   // 缺角四边形：矩形右上角挖去一个正方形缺口（正方形边长 240）
-  const notch = [[220, 560], [780, 560], [780, 800], [1020, 800], [1020, 1160], [220, 1160]];
+  const notch = [[250, 550], [750, 550], [750, 800], [1050, 800], [1050, 1150], [250, 1150]];
   // 直角梯形：上底 720、下底 440，左侧竖直
-  const trap = [[260, 560], [980, 560], [700, 1160], [260, 1160]];
+  const trap = [[300, 550], [1050, 550], [750, 1150], [300, 1150]];
   const map = { rect, notch, trap };
   const pts = (map[kind] || rect).map(([x, y]) => ({ x, y }));
   S.segments = [];
@@ -121,7 +121,7 @@ function buildZhShape(kind) {
   S.selected = null;
   S.zhDrawing = false;
   for (let i = 0; i < pts.length; i++) {
-    S.segments.push({ a: { ...pts[i] }, b: { ...pts[(i + 1) % pts.length] }, len: null, adj: '' });
+    S.segments.push({ a: { ...pts[i] }, b: { ...pts[(i + 1) % pts.length] }, len: null, adj: '+0+0' });
   }
   S.selected = { kind: 'seg', idx: 0 };
   updateModeBars();
@@ -165,7 +165,32 @@ function bindZhBar() {
     S().mode = 'select';
     updateModeBars();
     hooks.render(); hooks.refreshList();
-    hooks.setStatus('宅基地已转手绘：可点选/拖动端点/加线/分割/点注/平差');
+    hooks.setStatus('手绘模式：可加点/连线/拖动；点「取消手绘」返回宅基地');
+  };
+  const selBtn = document.getElementById('btnZhSelect');
+  if (selBtn) selBtn.onclick = () => {
+    const S0 = hooks.getState();
+    S0.mode = 'select';
+    S0.balconyFirst = null;
+    S0.stairStart = null;
+    S0.stairPrev = null;
+    S0.anchor = null;
+    S0.addFrom = null;
+    S0.freeFrom = null;
+    S0.pending = null;
+    S0.doorPending = null;
+    S0.interiorStart = null;
+    updateModeBars();
+    hooks.render(); hooks.refreshList();
+    hooks.setStatus('点选模式：点线段/注记可查看或输入长度');
+  };
+  const sc = document.getElementById('btnSketchCancel');
+  if (sc) sc.onclick = () => {
+    S().zhDrawing = false;
+    S().mode = 'select';
+    updateModeBars();
+    hooks.render(); hooks.refreshList();
+    hooks.setStatus('已退出手绘，返回宅基地');
   };
 }
 
@@ -181,8 +206,16 @@ function updateModeBars() {
   if (el('fcBar')) el('fcBar').style.display = plan ? 'flex' : 'none';
   if (el('jgBar')) el('jgBar').style.display = jg ? 'flex' : 'none';
   if (el('sketchBar')) el('sketchBar').style.display = drawMode ? 'flex' : 'none';
-  if (el('zhBar')) el('zhBar').style.display = zh ? 'flex' : 'none';
+  if (el('zhBar')) el('zhBar').style.display = (zh && !S().zhDrawing) ? 'flex' : 'none';
+  const sketchCancel = document.getElementById('btnSketchCancel');
+  if (sketchCancel) sketchCancel.style.display = (zh && S().zhDrawing) ? '' : 'none';
+  const ztd = document.getElementById('btnZhToDraw');
+  if (ztd) ztd.textContent = S().zhDrawing ? '取消手绘' : '转手绘';
+  const stairBtn = document.getElementById('btnZhStair');
+  if (stairBtn) stairBtn.style.display = '';
+
   if (el('panel')) el('panel').style.display = (plan || jg || sketch || zh) ? '' : 'none';
+  if (el('hint')) el('hint').style.display = (plan && !S().img) ? '' : 'none';
   if (el('thickBar')) el('thickBar').style.display = (plan || jg || sketch || zh) ? 'flex' : 'none';
   if (window.WS && window.WS.resizeCanvas) requestAnimationFrame(() => window.WS.resizeCanvas());
 }
@@ -307,8 +340,13 @@ document.getElementById('uoToSketch').onclick = uoToSketch;
     b.dataset.on = on ? '1' : '0';
     b.textContent = on ? '有邻建' : '无邻建';
     b.classList.toggle('on', on);
-    const di = document.getElementById('szDoor' + id.slice(-1));
+    const k = id.slice(-1);
+    const di = document.getElementById('szDoor' + k);
     if (di) di.style.display = on ? '' : 'none';
+    const si = document.getElementById('szStruct' + k);
+    if (si) si.style.display = on ? '' : 'none';
+    const fi = document.getElementById('szFloors' + k);
+    if (fi) fi.style.display = on ? '' : 'none';
   };
 });
 // ================= 农村宅基地：进门填写 =================
@@ -396,15 +434,22 @@ function zhUpdateFloorSel() {
 }
 function zhSwitchFloor(target) {
   const S = hooks.getState();
+  target = (String(target) === 'roof') ? 'roof' : parseInt(target, 10);
   if (String(target) === String(S.floorIdx)) return;
   S.floors = S.floors || {};
-  if (!S.floors[S.floorIdx]) S.floors[S.floorIdx] = zhSnapshot();
+  // 保存当前层（3 层及以上与 2 层共用一份数据）
+  const cur = S.floorIdx;
+  const curKey = (typeof cur === 'number' && cur >= 3) ? 2 : cur;
+  const snapCur = zhSnapshot();
+  if (typeof cur === 'number' && cur >= 3 && S.floors[curKey]) Object.assign(S.floors[curKey], snapCur);
+  else S.floors[curKey] = snapCur;
+
   let st = S.floors[target];
   if (!st) {
     if (target === 'roof') {
       const segs = (S.floors[2] ? S.floors[2].segments : S.segments)
         .filter(sg => !(sg.adj === '++'));
-      st = { segments: segs.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '' })), notes: [], doors: [], sizhi: null, totals: [] };
+      st = { segments: segs.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '+0+0' })), notes: [], doors: [], sizhi: null, totals: [] };
     } else {
       st = zhSnapshot();
     }
@@ -412,9 +457,14 @@ function zhSwitchFloor(target) {
   }
   S.floorIdx = target;
   zhApplySnap(st);
+  // 回一层：恢复四至邻墙等派生线段
+  if (String(target) === '1' && S.sizhi) rebuildSizhiDims();
   zhUpdateFloorSel();
+  updateModeBars();
+  hooks.render(); hooks.refreshList();
   hooks.setStatus(target === 'roof' ? '天面层（暂按一层图形显示）' : ('当前编辑 ' + target + ' 层'));
 }
+
 function zhSetFloors(count) {
   const S = hooks.getState();
   const n = Math.max(1, Math.min(30, parseInt(count, 10) || 1));
@@ -431,7 +481,7 @@ function zhSetFloors(count) {
   for (let i = 3; i <= n; i++) S.floors[i] = S.floors[2];
   // 天面：一层轮廓快照
   S.floors['roof'] = {
-    segments: f1.segments.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '' })),
+    segments: f1.segments.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '+0+0' })),
     notes: [], doors: [], sizhi: null, totals: [],
   };
   zhUpdateFloorSel();
@@ -443,7 +493,7 @@ function zhInitFloors() {
   S.floorIdx = 1;
   S.floors = { 1: zhSnapshot() };
   S.floors['roof'] = {
-    segments: S.segments.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '' })),
+    segments: S.segments.map(sg => ({ a: { ...sg.a }, b: { ...sg.b }, len: null, adj: '+0+0' })),
     notes: [], doors: [], sizhi: null, totals: [],
   };
   zhUpdateFloorSel();
@@ -460,16 +510,29 @@ const _flSel = document.getElementById('zhFloorSel');
 if (_flSel) _flSel.onchange = () => zhSwitchFloor(_flSel.value);
 function rebuildSizhiDims() {
   const S = hooks.getState();
-  S.segments = S.segments.filter(sg => !sg.sizhiDim);
-  if (!S.sizhi || !S.segments.length) return;
+  S.segments = S.segments.filter(sg => !sg.sizhiDim && !sg.neighborWall);
+  if (!S.sizhi) return;
+  const baseSegs = S.segments.filter(sg => !sg.stair && !sg.balcony);
+  if (!baseSegs.length) return;
   let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
-  S.segments.forEach(sg => [sg.a, sg.b].forEach(p => {
+  baseSegs.forEach(sg => [sg.a, sg.b].forEach(p => {
     minx = Math.min(minx, p.x); maxx = Math.max(maxx, p.x);
     miny = Math.min(miny, p.y); maxy = Math.max(maxy, p.y);
   }));
   const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
-  const far = 260;
+  const far = 250;
   const sides = ['up', 'right', 'down', 'left'];
+  // 邻墙（可点选起点画梯屋，但不测长、不分割）
+  sides.forEach(side => {
+    const it = S.sizhi[side];
+    if (!it || !it.adj || !it.adj.on) return;
+    let a, b;
+    if (side === 'up') { a = { x: minx, y: miny - far }; b = { x: maxx, y: miny - far }; }
+    else if (side === 'down') { a = { x: minx, y: maxy + far }; b = { x: maxx, y: maxy + far }; }
+    else if (side === 'left') { a = { x: minx - far, y: miny }; b = { x: minx - far, y: maxy }; }
+    else { a = { x: maxx + far, y: miny }; b = { x: maxx + far, y: maxy }; }
+    S.segments.push({ a, b, len: null, adj: '', neighborWall: true, neighborSide: side });
+  });
   sides.forEach(side => {
     const it = S.sizhi[side];
     if (!it || !it.adj || !it.adj.on) return;
@@ -478,8 +541,8 @@ function rebuildSizhiDims() {
     // 相对右手侧：从屋外看向建筑时的右手端
     if (side === 'up') { const x = maxx - margin; a = { x, y: miny }; b = { x, y: miny - far }; }
     else if (side === 'down') { const x = minx + margin; a = { x, y: maxy }; b = { x, y: maxy + far }; }
-    else if (side === 'left') { const y = maxy - margin; a = { x: minx, y }; b = { x: minx - far, y }; }
-    else { const y = miny + margin; a = { x: maxx, y }; b = { x: maxx + far, y }; }
+    else if (side === 'left') { const y = miny + margin; a = { x: minx, y }; b = { x: minx - far, y }; }
+    else { const y = maxy - margin; a = { x: maxx, y }; b = { x: maxx + far, y }; }
     S.segments.push({ a, b, len: null, adj: '', sizhiDim: side });
   });
 }
@@ -512,9 +575,39 @@ function szSetAdj(btn, on) {
   btn.textContent = on ? '有邻建' : '无邻建';
   btn.classList.toggle('on', !!on);
 }
+const _nbrSave = document.getElementById('nbrSave');
+if (_nbrSave) _nbrSave.onclick = () => {
+  const S = hooks.getState();
+  if (!nbrEditing) return;
+  const it = S.sizhi[nbrEditing.side];
+  if (!it || !it.adj) return;
+  it.adj.labels = it.adj.labels || [];
+  it.adj.labels[nbrEditing.idx] = {
+    door: (document.getElementById('nbrDoor').value || '').trim(),
+    struct: document.getElementById('nbrStruct').value || '',
+    floors: (document.getElementById('nbrFloors').value || '').trim(),
+  };
+  document.getElementById('nbrModal').classList.remove('open');
+  nbrEditing = null;
+  hooks.render(); hooks.refreshList();
+  hooks.setStatus('邻墙信息已保存');
+};
+const _nbrDel = document.getElementById('nbrDel');
+if (_nbrDel) _nbrDel.onclick = () => {
+  const S = hooks.getState();
+  if (!nbrEditing) return;
+  const it = S.sizhi[nbrEditing.side];
+  if (it && it.adj && it.adj.labels) it.adj.labels[nbrEditing.idx] = { door: '', struct: '', floors: '' };
+  document.getElementById('nbrModal').classList.remove('open');
+  nbrEditing = null;
+  hooks.render(); hooks.refreshList();
+  hooks.setStatus('已清空该处邻墙信息');
+};
+const _nbrClose = document.getElementById('nbrClose');
+if (_nbrClose) _nbrClose.onclick = () => { document.getElementById('nbrModal').classList.remove('open'); nbrEditing = null; };
 const _szBtn = document.getElementById('btnZhSizhi');
 if (_szBtn) _szBtn.onclick = () => {
-  if (hooks.getState().floorIdx !== 1) { hooks.setStatus('四至只在一层设置'); return; }
+  if (String(hooks.getState().floorIdx) !== '1') { hooks.setStatus('四至只在一层设置（当前 ' + hooks.getState().floorIdx + ' 层）'); return; }
   const S = hooks.getState();
   if (!S.segments.length) { hooks.setStatus('先建好宅基地形状'); return; }
   const cur = S.sizhi || {};
@@ -527,6 +620,11 @@ if (_szBtn) _szBtn.onclick = () => {
     const adj = item.adj || {};
     szSetAdj(adjBtn, adj.on);
     if (doorInp) { doorInp.style.display = adj.on ? '' : 'none'; doorInp.value = adj.door || ''; }
+    const K = { up: 'U', right: 'R', down: 'D', left: 'L' }[side];
+    const si = document.getElementById('szStruct' + K);
+    if (si) { si.style.display = adj.on ? '' : 'none'; si.value = adj.struct || ''; }
+    const fi = document.getElementById('szFloors' + K);
+    if (fi) { fi.style.display = adj.on ? '' : 'none'; fi.value = adj.floors || ''; }
   });
   document.getElementById('sizhiModal').classList.add('open');
 };
@@ -538,6 +636,11 @@ SZ_SIDES.forEach(side => {
     szSetAdj(b, on);
     const di = document.getElementById(doorId);
     if (di) di.style.display = on ? '' : 'none';
+    const K = { up: 'U', right: 'R', down: 'D', left: 'L' }[side];
+    const si = document.getElementById('szStruct' + K);
+    if (si) si.style.display = on ? '' : 'none';
+    const fi = document.getElementById('szFloors' + K);
+    if (fi) fi.style.display = on ? '' : 'none';
   };
 });
 const _szSave = document.getElementById('szSave');
@@ -548,8 +651,25 @@ if (_szSave) _szSave.onclick = () => {
     const [inp, adjBtn, doorInp] = SZ_IDS[side].map(id => document.getElementById(id));
     next[side] = {
       text: (inp ? inp.value.trim() : '') || '巷',
-      adj: { on: adjBtn && adjBtn.dataset.on === '1', door: doorInp ? (doorInp.value || '').trim() : '' },
+      adj: {
+      on: adjBtn && adjBtn.dataset.on === '1',
+      door: doorInp ? (doorInp.value || '').trim() : '',
+      struct: (document.getElementById('szStruct' + ({ up: 'U', right: 'R', down: 'D', left: 'L' }[side])) || {}).value || '',
+      floors: (document.getElementById('szFloors' + ({ up: 'U', right: 'R', down: 'D', left: 'L' }[side])) || {}).value || '',
+    },
     };
+  });
+  SZ_SIDES.forEach(side => {
+    const prev = (S.sizhi && S.sizhi[side] && S.sizhi[side].adj) ? S.sizhi[side].adj.labels : null;
+    const a = next[side].adj;
+    a.labels = prev && prev.length ? prev : [
+      { door: a.door || '', struct: a.struct || '', floors: a.floors || '' },
+    ];
+    if (a.labels[0]) {
+      a.labels[0].door = a.door || '';
+      a.labels[0].struct = a.struct || '';
+      a.labels[0].floors = a.floors || '';
+    }
   });
   S.sizhi = next;
   rebuildSizhiDims();
@@ -561,7 +681,7 @@ const _szClear = document.getElementById('szClear');
 if (_szClear) _szClear.onclick = () => {
   const S0 = hooks.getState();
   S0.sizhi = null;
-  S0.segments = S0.segments.filter(sg => !sg.sizhiDim);
+  S0.segments = S0.segments.filter(sg => !sg.sizhiDim && !sg.neighborWall);
   document.getElementById('sizhiModal').classList.remove('open');
   hooks.render(); hooks.refreshList();
   hooks.setStatus('已清除四至');
@@ -575,13 +695,26 @@ if (_zhUndo) _zhUndo.onclick = () => {
 const _stairBtn = document.getElementById('btnZhStair');
 if (_stairBtn) _stairBtn.onclick = () => {
   const S = hooks.getState();
-  if (String(S.floorIdx) !== 'roof') { hooks.setStatus('梯屋只在天面层使用，请先切换到天面'); return; }
-  if (!S.segments.length) { hooks.setStatus('天面还没有图形'); return; }
-  S.mode = 'stairhouse';
-  S.stairStart = null;
-  S.stairPrev = null;
-  S.stair = true;
-  hooks.setStatus('梯屋：先点墙线上一点（50px 内）');
+  if (!S.segments.length) { hooks.setStatus('还没有图形'); return; }
+  const floor = String(S.floorIdx);
+  const hasAdj = (function () {
+    if (!S.sizhi) return false;
+    return ['up', 'right', 'down', 'left'].some(side => S.sizhi[side] && S.sizhi[side].adj && S.sizhi[side].adj.on);
+  })();
+  if (floor === 'roof') {
+    S.mode = 'stairhouse';
+    S.stairStart = null; S.stairPrev = null;
+    hooks.setStatus('梯屋：先点墙线上一点（50px 内）');
+    return;
+  }
+  if (floor === '1') {
+    if (!hasAdj) { hooks.setStatus('一层没有邻墙：先到四至里开启邻建，或切到天面画梯屋'); return; }
+    S.mode = 'stairhouse';
+    S.stairStart = null; S.stairPrev = null;
+    hooks.setStatus('梯屋（一层邻墙）：先点邻墙或墙线上一点');
+    return;
+  }
+  hooks.setStatus('梯屋只能在一层（邻墙）或天面使用');
 };
 const _balBtn = document.getElementById('btnZhBalcony');
 if (_balBtn) _balBtn.onclick = () => {
@@ -593,7 +726,7 @@ if (_balBtn) _balBtn.onclick = () => {
 };
 const _doorBtn = document.getElementById('btnZhDoor');
 if (_doorBtn) _doorBtn.onclick = () => {
-  if (hooks.getState().floorIdx !== 1) { hooks.setStatus('门牌只在一层设置'); return; }
+  if (String(hooks.getState().floorIdx) !== '1') { hooks.setStatus('门牌只在一层设置（当前 ' + hooks.getState().floorIdx + ' 层）'); return; }
   const S = hooks.getState();
   if (!S.houseNo) { zhOpenInit(); return; }
   S.doorPending = String(S.houseNo);
