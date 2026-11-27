@@ -236,3 +236,15 @@ button:active { transform: scale(0.97); }
 .ps-cap { text-align: center; font-size: 13px; color: #123a63; margin-top: 2px; }
 
 .ps-item { display: flex; flex-direction: column; }
+
+#pdfPageModal { display: none; position: fixed; inset: 0; z-index: 1007;
+  background: rgba(0,0,0,.75); align-items: center; justify-content: center; }
+#pdfPageModal.open { display: flex; }
+#pdfPageModal .pm-box { background: #fff; padding: 16px 18px; border-radius: 12px;
+  display: flex; flex-direction: column; gap: 10px; min-width: 320px; max-height: 80vh; overflow: auto; }
+.pdf-page-list { display: flex; flex-direction: column; gap: 8px; }
+.pdf-page-list button { font-size: 15px; padding: 10px 12px; border-radius: 8px; border: 1px solid #b9c8da;
+  background: #fff; color: #123a63; text-align: left; }
+#pdfPageModal .sm-btns { display: flex; gap: 8px; }
+#pdfPageModal .sm-btns button { font-size: 15px; padding: 9px 14px; border-radius: 8px; border: none; background: #123a63; color: #fff; }
+#pdfPageModal #pdfExportAll { background: #f5a623; color: #123a63; font-weight: 700; }
