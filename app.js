@@ -293,7 +293,7 @@
   }, 700);
 
   const verEl = document.getElementById('appVer');
-  if (verEl) verEl.textContent = 'v267';
+  if (verEl) verEl.textContent = 'v269';
   if (location.search.includes('relaytest')) setTimeout(() => {
     window.RELAY.init({
       onStatus: (s) => setStatus('RELAY ' + s),
@@ -870,6 +870,26 @@
       const n = window.EXP.pdfPageCount();
       setStatus('PDFPAGES ' + n);
     } catch (e) { setStatus('PDFPAGES ERR ' + e.message); }
+  }, 900);
+
+  if (location.search.includes('pdfpageuitest')) setTimeout(() => {
+    const rect = (y0) => [
+      { a: { x: 250, y: y0 }, b: { x: 1050, y: y0 }, len: 10, adj: '+0+0' },
+      { a: { x: 1050, y: y0 }, b: { x: 1050, y: y0 + 600 }, len: 10, adj: '+0+0' },
+      { a: { x: 1050, y: y0 + 600 }, b: { x: 250, y: y0 + 600 }, len: 10, adj: '+0+0' },
+      { a: { x: 250, y: y0 + 600 }, b: { x: 250, y: y0 }, len: 10, adj: '+0+0' },
+    ];
+    S.app = 'zh'; S.floorCount = 3; S.floorIdx = 1;
+    S.segments = rect(550); S.notes = []; S.doors = []; S.totals = []; S.sizhi = null;
+    S.floors = {
+      1: { segments: rect(550), notes: [], doors: [], sizhi: null, totals: [] },
+      2: { segments: rect(550).map(g => ({ a: { ...g.a }, b: { ...g.b }, len: 10, adj: '++' })), notes: [], doors: [], sizhi: null, totals: [] },
+      roof: { segments: rect(550).concat([{ a: { x: 600, y: 550 }, b: { x: 600, y: 800 }, len: null, adj: '+0+0', stair: true, stairLabel: true, stairId: 'st1' }]), notes: [], doors: [], sizhi: null, totals: [] },
+    };
+    S.floors[3] = S.floors[2];
+    document.getElementById('btnPdf').click();
+    const n = document.querySelectorAll('#pdfPageList button').length;
+    setStatus('PDFPAGEUI open=' + document.getElementById('pdfPageModal').classList.contains('open') + ' buttons=' + n);
   }, 900);
 
   window.__ready = true;
