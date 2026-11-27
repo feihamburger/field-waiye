@@ -160,8 +160,7 @@ function exportPhotoSheetExcel(projectNo, items) {
   });
 }
 
-function exportPdf() { ensureCJK(() => _exportPdfNow()); }
-function _exportPdfNow(save) {
+function buildPlanPages() {
   const S = hooks.getState();
   const n = Math.max(1, parseInt(S.floorCount || 1, 10));
   const live = { segments: S.segments, notes: S.notes, doors: S.doors, sizhi: S.sizhi, totals: S.totals };
@@ -178,12 +177,32 @@ function _exportPdfNow(save) {
   const stairPages = roofD && (roofD.segments || []).some(sg => sg.stair);
   const f1 = floors[1] || live;
   if (stairPages) pages.push({ title: '叠图（一层 + 天面梯屋虚线）', data: f1, overlayRoof: roofD });
+  pages.forEach((pg, i) => { pg.idx = i; });
+  return pages;
+}
+
+function pdfPageList() {
+  return buildPlanPages().map(p => ({ idx: p.idx, title: p.title }));
+}
+
+function exportPdf(only) {
+  ensureCJK(() => _exportPdfNow(true, only));
+}
+
+function _exportPdfNow(save, only) {
+  const pages = buildPlanPages();
   if (!pages.length) { alert('没有可导出的数据'); return null; }
+  let sel = pages;
+  if (Array.isArray(only) && only.length) sel = pages.filter(p => only.indexOf(p.idx) >= 0);
+  if (!sel.length) return null;
   let doc = null;
-  pages.forEach((pg, i) => {
+  sel.forEach((pg, i) => {
     doc = _drawPlanPage(doc, pg.data, pg.title, i + 1, pg.overlayRoof || null);
   });
-  if (save !== false) doc.save('手稿电子版.pdf');
+  if (save !== false) {
+    const name = sel.length === 1 ? ('手稿-' + sel[0].title + '.pdf') : '手稿电子版.pdf';
+    doc.save(name);
+  }
   return doc;
 }
 
@@ -222,7 +241,7 @@ function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
     placed.push([x0, y0, x1, y1]);
     const deg = -angleRad * 180 / Math.PI;
     const sx = cx - Math.cos(angleRad) * w / 2;
-    const sy = cy + Math.sin(angleRad) * w / 2;
+    const sy = cy - Math.sin(angleRad) * w / 2;
     doc.setFontSize(fs);
     doc.text(txt, sx, sy, { angle: deg });
     return { cx, cy, w };
@@ -269,14 +288,24 @@ function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
 
   doc.setDrawColor(0, 0, 0);
   S.segments.forEach(sg => {
+    if (sg.neighborWall || sg.sizhiDim) return;
     const a = mp(sg.a), b = mp(sg.b);
     doc.setLineWidth(0.9);
     doc.line(a.x, a.y, b.x, b.y);
   });
 
+  function adjParts(adj) {
+    if (!adj) return ['', ''];
+    if (adj.length === 2) return [adj[0], adj[1]];
+    if (adj.length === 4) return [adj.slice(0, 2), adj.slice(2, 4)];
+    return ['', adj];
+  }
   S.segments.forEach(sg => {
     if (sg.len == null) return;
-    const txt = sg.adj ? `${sg.len.toFixed(3)} ${sg.adj}` : sg.len.toFixed(3);
+    const num = sg.len.toFixed(3);
+    const pr = adjParts(sg.adj);
+    let txt = num;
+    if (pr[0] || pr[1]) txt = [pr[0], num, pr[1]].filter(Boolean).join(' ');
     labelAlong(txt, mp(sg.a), mp(sg.b), 7.5);
   });
 
@@ -298,15 +327,15 @@ function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
        });
      });
      const cx = (minx + maxx) / 2, cy = (miny + maxy) / 2;
-     const near = 150, far = 260, tick = 18;
+     const near = 150, far = 250, tick = 50;
      const line = (x1, y1, x2, y2) => { const a2 = mp({ x: x1, y: y1 }), b2 = mp({ x: x2, y: y2 }); doc.line(a2.x, a2.y, b2.x, b2.y); };
      const txtAt = (txt, x, y) => { const q = mp({ x, y }); doc.text(txt, q.x, q.y, { align: 'center' }); };
      doc.setDrawColor(141, 110, 99); doc.setTextColor(109, 76, 65); doc.setFontSize(10);
      const geoms = {
-       up:    { y: miny - far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: miny - near, dx: cx, dy: miny - far - 16, sign: -1 },
-       down:  { y: maxy + far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: maxy + near, dx: cx, dy: maxy + far + 16, sign: 1 },
-       right: { x: maxx + far, y1: miny, y2: maxy, horiz: false, tx: maxx + near, ty: cy, dx: maxx + far + 22, dy: cy, sign: 1 },
-       left:  { x: minx - far, y1: miny, y2: maxy, horiz: false, tx: minx - near, ty: cy, dx: minx - far - 22, dy: cy, sign: -1 },
+       up:    { y: miny - far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: miny - near, dx: cx, dy: miny - far - 36, sign: -1 },
+       down:  { y: maxy + far, x1: minx, x2: maxx, horiz: true, tx: cx, ty: maxy + near, dx: cx, dy: maxy + far + 36, sign: 1 },
+       right: { x: maxx + far, y1: miny, y2: maxy, horiz: false, tx: maxx + near, ty: cy, dx: maxx + far + 40, dy: cy, sign: 1 },
+       left:  { x: minx - far, y1: miny, y2: maxy, horiz: false, tx: minx - near, ty: cy, dx: minx - far - 40, dy: cy, sign: -1 },
      };
      ['up', 'right', 'down', 'left'].forEach(side => {
        const it = S2.sizhi[side];
@@ -322,7 +351,30 @@ function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
            line(g2.x, g2.y1, g2.x + g2.sign * tick, g2.y1);
            line(g2.x, g2.y2, g2.x + g2.sign * tick, g2.y2);
          }
-         if (it.adj.door) txtAt('#' + it.adj.door, g2.dx, g2.dy);
+                  // 主墙到邻墙的间距虚线（两端箭头）
+         const dimA = g2.horiz ? { x: g2.x1 + 50, y: (side === 'up' ? miny : maxy) } : { x: (side === 'left' ? minx : maxx), y: g2.y1 + 50 };
+         const dimB = g2.horiz ? { x: dimA.x, y: g2.y } : { x: g2.x, y: dimA.y };
+         const qa = mp(dimA), qb = mp(dimB);
+         doc.setLineWidth(0.6);
+         doc.setLineDashPattern([4, 3], 0);
+         doc.line(qa.x, qa.y, qb.x, qb.y);
+         doc.setLineDashPattern([], 0);
+         arrow({ x: qa.x + (qb.x - qa.x) * 0.15, y: qa.y + (qb.y - qa.y) * 0.15 }, qa);
+         arrow({ x: qb.x + (qa.x - qb.x) * 0.15, y: qb.y + (qa.y - qb.y) * 0.15 }, qb);
+         // 邻建信息（门牌 + 结构层数），支持两组
+         const labels = it.adj.labels || [{ door: it.adj.door, struct: it.adj.struct, floors: it.adj.floors }];
+         labels.forEach((lb, li) => {
+           if (!lb) return;
+           const s = [lb.door ? '#' + lb.door : '', ((lb.struct || '') + (lb.floors || '')).trim()].filter(Boolean).join(' ');
+           if (!s) return;
+           const frac = li === 0 ? 0.28 : 0.72;
+           let px, py;
+           if (side === 'up') { px = minx + (maxx - minx) * frac; py = miny - far - 36; }
+           else if (side === 'down') { px = minx + (maxx - minx) * frac; py = maxy + far + 36; }
+           else if (side === 'left') { px = minx - far - 40; py = miny + (maxy - miny) * frac; }
+           else { px = maxx + far + 40; py = miny + (maxy - miny) * frac; }
+           txtAt(s, px, py);
+         });
        }
        txtAt(it.text || '', g2.tx, g2.ty);
      });
@@ -386,6 +438,7 @@ function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
     init(h) { hooks = h; },
     exportCsv,
     exportPdf,
+    pdfPageList,
     exportPhotoSheet,
     exportPhotoSheetExcel,
     pdfPageCount() { const d = _exportPdfNow(false); return d ? d.getNumberOfPages() : 0; },
