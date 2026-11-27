@@ -161,9 +161,34 @@ function exportPhotoSheetExcel(projectNo, items) {
 }
 
 function exportPdf() { ensureCJK(() => _exportPdfNow()); }
-function _exportPdfNow() {
+function _exportPdfNow(save) {
   const S = hooks.getState();
-  if (!S.segments.length && !S.notes.length) { alert('还没有数据'); return; }
+  const n = Math.max(1, parseInt(S.floorCount || 1, 10));
+  const live = { segments: S.segments, notes: S.notes, doors: S.doors, sizhi: S.sizhi, totals: S.totals };
+  const floors = Object.assign({}, S.floors || {});
+  const cur = String(S.floorIdx) === 'roof' ? 'roof' : (parseInt(S.floorIdx, 10) || 1);
+  floors[cur] = live;
+  const pages = [];
+  for (let i = 1; i <= n; i++) {
+    const d = floors[i] || (i >= 3 ? floors[2] : null) || (i === 1 ? live : null) || floors[2];
+    if (d) pages.push({ title: i + ' 层平面图', data: d });
+  }
+  const roofD = floors['roof'] || null;
+  if (roofD) pages.push({ title: '天面平面图', data: roofD });
+  const stairPages = roofD && (roofD.segments || []).some(sg => sg.stair);
+  const f1 = floors[1] || live;
+  if (stairPages) pages.push({ title: '叠图（一层 + 天面梯屋虚线）', data: f1, overlayRoof: roofD });
+  if (!pages.length) { alert('没有可导出的数据'); return null; }
+  let doc = null;
+  pages.forEach((pg, i) => {
+    doc = _drawPlanPage(doc, pg.data, pg.title, i + 1, pg.overlayRoof || null);
+  });
+  if (save !== false) doc.save('手稿电子版.pdf');
+  return doc;
+}
+
+function _drawPlanPage(docParam, S2, title, pageNo, overlayRoof) {
+  const S = S2;
   const { jsPDF } = window.jspdf;
   const pts = [];
   S.segments.forEach(sg => { pts.push(sg.a, sg.b); });
@@ -179,10 +204,13 @@ function _exportPdfNow() {
   const ox = (W - spanx * s) / 2, oy = 90;
   const mp = p => ({ x: ox + (p.x - minx) * s, y: H - oy - (p.y - miny) * s });
 
-  const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
-  applyCJK(doc);
+  let doc = docParam;
+  if (doc) doc.addPage();
+  else { doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' }); applyCJK(doc); }
   doc.setFontSize(14);
-  doc.text('Sketch', 30, 30);
+  doc.text(title || 'Sketch', 30, 30);
+  doc.setFontSize(9);
+  doc.text('第 ' + pageNo + ' 页', 812, 30, { align: 'right' });
 
   const placed = [];
   function putText(txt, cx, cy, angleRad, fs) {
@@ -340,7 +368,18 @@ function _exportPdfNow() {
  if (hh.roof != null) htxt.push('天面梯屋高度 ' + hh.roof.toFixed(3) + ' m');
  const phh = doc.internal.pageSize.getHeight();
  htxt.forEach((s, i) => doc.text(s, 20, phh - 8 - i * 6));
- doc.save('手稿电子版.pdf');
+ if (overlayRoof && overlayRoof.segments) {
+    doc.setDrawColor(90, 90, 90);
+    doc.setLineWidth(1);
+    doc.setLineDashPattern([6, 3], 0);
+    overlayRoof.segments.forEach(sg => {
+      if (!sg.stair) return;
+      const p1 = mp(sg.a), p2 = mp(sg.b);
+      doc.line(p1.x, p1.y, p2.x, p2.y);
+    });
+    doc.setLineDashPattern([], 0);
+  }
+  return doc;
 }
 
   window.EXP = {
@@ -349,6 +388,7 @@ function _exportPdfNow() {
     exportPdf,
     exportPhotoSheet,
     exportPhotoSheetExcel,
+    pdfPageCount() { const d = _exportPdfNow(false); return d ? d.getNumberOfPages() : 0; },
     ensureCJK,
     fontWidth() {
       const jr = window.jspdf && window.jspdf.jsPDF;
