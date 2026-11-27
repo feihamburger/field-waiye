@@ -1800,7 +1800,29 @@ $('psExport').onclick = () => {
 };
 
 $('btnCsv').onclick = () => window.EXP.exportCsv();
-$('btnPdf').onclick = () => window.EXP.exportPdf();
+$('btnPdf').onclick = () => {
+  const list = window.EXP.pdfPageList ? window.EXP.pdfPageList() : [];
+  const box = document.getElementById('pdfPageList');
+  box.innerHTML = '';
+  if (!list.length) {
+    box.innerHTML = '<div style="color:#90a4ae;font-size:14px">还没有可导出的图形</div>';
+  }
+  list.forEach(pg => {
+    const b = document.createElement('button');
+    b.textContent = '导出：' + pg.title;
+    b.onclick = () => {
+      document.getElementById('pdfPageModal').classList.remove('open');
+      window.EXP.exportPdf([pg.idx]);
+    };
+    box.appendChild(b);
+  });
+  document.getElementById('pdfPageModal').classList.add('open');
+};
+$('pdfExportAll').onclick = () => {
+  document.getElementById('pdfPageModal').classList.remove('open');
+  window.EXP.exportPdf();
+};
+$('pdfPageClose').onclick = () => document.getElementById('pdfPageModal').classList.remove('open');
 
 $('btnPanel').onclick = () => {
   const p = $('panel');
